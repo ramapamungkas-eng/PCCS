@@ -12,9 +12,10 @@ use Livewire\Attributes\Validate;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Mary\Traits\Toast;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Support\Excel;
 use App\Imports\HpmPccImport;
 use App\Exports\PccTemplateExport;
+use App\Exceptions\ExcelValidationException;
 use App\Jobs\PrintLabelsPCC;
 
 new
@@ -350,7 +351,7 @@ class extends Component {
             $this->closeImportModal();
             $this->resetPage();
 
-        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+        } catch (ExcelValidationException $e) {
             // Tangani error validasi dari Maatwebsite/Excel
             $failures = $e->failures();
             $first    = $failures[0] ?? null;

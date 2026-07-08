@@ -8,9 +8,10 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Validate;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Support\Excel;
 use App\Imports\FinishGoodImport;
 use App\Exports\FinishGoodTemplateExport;
+use App\Exceptions\ExcelValidationException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -270,7 +271,7 @@ new class extends \Livewire\Volt\Component {
             $this->closeImportModal();
             unset($this->finishGoods); // Clear computed cache
 
-        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+        } catch (ExcelValidationException $e) {
             // Tangani error validasi dari Maatwebsite/Excel
             $failures = $e->failures();
             $first = $failures[0] ?? null;

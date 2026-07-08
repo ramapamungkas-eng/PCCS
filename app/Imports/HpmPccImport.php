@@ -2,24 +2,12 @@
 
 namespace App\Imports;
 
+use App\Contracts\ExcelImport;
 use App\Models\Customer\HPM\Pcc;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
-use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\OnEachRow;
-use Maatwebsite\Excel\Row;
-use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
-use Maatwebsite\Excel\Concerns\SkipsOnError;
-use Maatwebsite\Excel\Concerns\WithBatchInserts;
-use Maatwebsite\Excel\Concerns\WithChunkReading;
 
-class HpmPccImport implements
-    OnEachRow,
-    WithHeadingRow,
-    SkipsEmptyRows,
-    SkipsOnError,
-    WithBatchInserts,
-    WithChunkReading
+class HpmPccImport implements ExcelImport
 {
     public array $summary = [
         'total' => 0,
@@ -28,37 +16,34 @@ class HpmPccImport implements
         'skipped' => 0,
     ];
 
-    public function onRow(Row $row): void
+    public function processRow(array $row, int $rowNumber): void
     {
-        $data = $row->toArray();
         $this->summary['total']++;
 
-        $slipBarcode = isset($data['slip_barcode']) ? (string) $data['slip_barcode'] : null;
+        $slipBarcode = isset($row['slip_barcode']) ? (string) $row['slip_barcode'] : null;
         if (!$slipBarcode) {
             Log::warning('slip_barcode kosong pada baris import PCC, baris dilewati', [
-                'row_number' => $row->getIndex(),
+                'row' => $rowNumber,
             ]);
             $this->summary['skipped']++;
             return;
         }
 
-        $dateString = $data['date'] ?? null;
-        $timeString = $data['time'] ?? null;
+        $dateString = $row['date'] ?? null;
+        $timeString = $row['time'] ?? null;
 
         $convertedDate = null;
         $convertedTime = null;
 
-        // Konversi Tanggal (Format: d-m, contoh: 04-11)
         if ($dateString) {
             try {
                 $convertedDate = Carbon::createFromFormat('d-m', (string) $dateString)
                     ->year(now()->year)
                     ->toDateString();
             } catch (\Exception $e) {
-                // Only log if date conversion fails and it's not null/empty
                 if (!empty($dateString)) {
                     Log::warning('Format tanggal tidak valid pada baris import PCC', [
-                        'row_number' => $row->getIndex(),
+                        'row' => $rowNumber,
                         'slip_barcode' => $slipBarcode,
                         'date_string' => $dateString,
                     ]);
@@ -67,15 +52,13 @@ class HpmPccImport implements
             }
         }
 
-        // Konversi Waktu (Format: H:i, contoh: 08:00)
         if ($timeString) {
             try {
                 $convertedTime = Carbon::createFromFormat('H:i', (string) $timeString)->toTimeString();
             } catch (\Exception $e) {
-                // Only log if time conversion fails and it's not null/empty
                 if (!empty($timeString)) {
                     Log::warning('Format waktu tidak valid pada baris import PCC', [
-                        'row_number' => $row->getIndex(),
+                        'row' => $rowNumber,
                         'slip_barcode' => $slipBarcode,
                         'time_string' => $timeString,
                     ]);
@@ -85,30 +68,30 @@ class HpmPccImport implements
         }
 
         $payload = [
-            'from'                  => $data['from'] ?? null,
-            'to'                    => $data['to'] ?? null,
-            'supply_address'        => $data['supply_address'] ?? null,
-            'next_supply_address'   => $data['next_supply_address'] ?? null,
-            'ms_id'                 => $data['ms_id'] ?? null,
-            'inventory_category'    => $data['inventory_category'] ?? null,
-            'part_no'               => $data['part_no'] ?? null,
-            'part_name'             => $data['part_name'] ?? null,
-            'color_code'            => $data['color_code'] ?? null,
-            'ps_code'               => $data['ps_code'] ?? null,
-            'order_class'           => $data['order_class'] ?? null,
-            'prod_seq_no'           => $data['prod_seq_no'] ?? null,
-            'kd_lot_no'             => $data['kd_lot_no'] ?? null,
-            'ship'                  => isset($data['ship']) ? (int) $data['ship'] : null,
-            'slip_no'               => $data['slip_no'] ?? null,
-            'date'                  => $convertedDate,
-            'time'                  => $convertedTime,
-            'hns'                   => $data['hns'] ?? null,
+            'from' => $row['from'] ?? null,
+            'to' => $row['to'] ?? null,
+            'supply_address' => $row['supply_address'] ?? null,
+            'next_supply_address' => $row['next_supply_address'] ?? null,
+            'ms_id' => $row['ms_id'] ?? null,
+            'inventory_category' => $row['inventory_category'] ?? null,
+            'part_no' => $row['part_no'] ?? null,
+            'part_name' => $row['part_name'] ?? null,
+            'color_code' => $row['color_code'] ?? null,
+            'ps_code' => $row['ps_code'] ?? null,
+            'order_class' => $row['order_class'] ?? null,
+            'prod_seq_no' => $row['prod_seq_no'] ?? null,
+            'kd_lot_no' => $row['kd_lot_no'] ?? null,
+            'ship' => isset($row['ship']) ? (int) $row['ship'] : null,
+            'slip_no' => $row['slip_no'] ?? null,
+            'date' => $convertedDate,
+            'time' => $convertedTime,
+            'hns' => $row['hns'] ?? null,
         ];
 
         try {
             $model = Pcc::updateOrCreate(
                 ['slip_barcode' => $slipBarcode],
-                $payload + ['slip_barcode' => $slipBarcode]
+                $payload + ['slip_barcode' => $slipBarcode],
             );
 
             if ($model->wasRecentlyCreated) {
@@ -116,10 +99,9 @@ class HpmPccImport implements
             } else {
                 $this->summary['updated']++;
             }
-            // No success logging here - only track in summary
         } catch (\Throwable $e) {
             Log::error('Error saat import PCC', [
-                'row_number' => $row->getIndex(),
+                'row' => $rowNumber,
                 'slip_barcode' => $slipBarcode,
                 'error' => $e->getMessage(),
                 'error_type' => get_class($e),
@@ -128,14 +110,14 @@ class HpmPccImport implements
         }
     }
 
-    public function batchSize(): int
+    public function rules(): array
     {
-        return 500;
+        return [];
     }
 
-    public function chunkSize(): int
+    public function customValidationMessages(): array
     {
-        return 500;
+        return [];
     }
 
     public function onError(\Throwable $e): void
@@ -152,7 +134,6 @@ class HpmPccImport implements
         return $this->summary;
     }
 
-    // Compatibility getters for existing UI summary usage
     public function getRowCount(): int
     {
         return $this->summary['total'] ?? 0;
@@ -160,13 +141,11 @@ class HpmPccImport implements
 
     public function getDuplicateCount(): int
     {
-        // Map skipped to duplicates for legacy display
         return $this->summary['skipped'] ?? 0;
     }
 
     public function getUniqueCount(): int
     {
-        // Treat created + updated as successfully processed rows
         return ($this->summary['unique'] ?? 0) + ($this->summary['updated'] ?? 0);
     }
 }

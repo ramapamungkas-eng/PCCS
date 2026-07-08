@@ -2,39 +2,13 @@
 
 namespace App\Exports;
 
-use Maatwebsite\Excel\Concerns\FromArray;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithStyles;
-use Maatwebsite\Excel\Concerns\WithColumnWidths;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
+use App\Contracts\ExcelExport;
 use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class HpmScheduleTemplateExport implements FromArray, WithHeadings, WithStyles, WithColumnWidths
+class HpmScheduleTemplateExport implements ExcelExport
 {
-    /**
-     * Return sample data for template.
-     */
-    public function array(): array
-    {
-        return [
-            [
-                // Example with mixed Excel-like formats
-                // slip_number | schedule_date (yyyymmdd) | adjusted_date (dd-MMM-yy) | schedule_time (HHMMSS) | adjusted_time (H:i) | delivery_time | delivery_quantity | adjustment_quantity
-                '254510000592',
-                '20251031',      // yyyymmdd
-                '31-Oct-25',     // dd-MMM-yy
-                '90000',         // HHMMSS => 09:00:00
-                '13:00',         // H:i => 13:00:00
-                60,
-                30,
-            ],
-        ];
-    }
-
-    /**
-     * Define column headings.
-     */
     public function headings(): array
     {
         return [
@@ -48,51 +22,49 @@ class HpmScheduleTemplateExport implements FromArray, WithHeadings, WithStyles, 
         ];
     }
 
-    /**
-     * Apply styles to worksheet.
-     */
-    public function styles(Worksheet $sheet)
+    public function data(): array
     {
         return [
-            // Header row style
-            1 => [
-                'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => 'FFFFFF']],
-                'fill' => [
-                    'fillType' => Fill::FILL_SOLID,
-                    'startColor' => ['rgb' => '4472C4']
-                ],
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => '000000']
-                    ]
-                ]
-            ],
-            // Data rows border
-            'A2:H100' => [
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => 'CCCCCC']
-                    ]
-                ]
-            ]
+            ['254510000592', '20251031', '31-Oct-25', '90000', '13:00', 60, 30],
         ];
     }
 
-    /**
-     * Define column widths.
-     */
+    public function styles(Worksheet $sheet): void
+    {
+        $sheet->getStyle('A1:G1')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '4472C4'],
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => '000000'],
+                ],
+            ],
+        ]);
+
+        $sheet->getStyle('A2:G100')->applyFromArray([
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => 'CCCCCC'],
+                ],
+            ],
+        ]);
+    }
+
     public function columnWidths(): array
     {
         return [
-            'A' => 20, // slip_number
-            'B' => 18, // schedule_date
-            'C' => 18, // adjusted_date
-            'D' => 15, // schedule_time
-            'E' => 15, // adjusted_time
-            'G' => 20, // delivery_quantity
-            'H' => 20, // adjustment_quantity
+            'A' => 20,
+            'B' => 18,
+            'C' => 18,
+            'D' => 15,
+            'E' => 15,
+            'F' => 20,
+            'G' => 20,
         ];
     }
 }

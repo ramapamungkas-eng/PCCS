@@ -12,7 +12,7 @@ use Livewire\Attributes\Validate;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Mary\Traits\Toast;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Support\Excel;
 use App\Imports\HpmScheduleImport;
 use App\Exports\HpmScheduleTemplateExport;
 

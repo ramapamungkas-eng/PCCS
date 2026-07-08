@@ -3,7 +3,7 @@
 use Livewire\Volt\Component;
 use Mary\Traits\Toast;
 use Illuminate\Support\Facades\DB;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Support\Excel;
 use App\Exports\PccReportExport;
 
 new class extends Component {

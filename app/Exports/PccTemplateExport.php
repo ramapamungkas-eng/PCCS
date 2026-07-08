@@ -2,10 +2,10 @@
 
 namespace App\Exports;
 
-use Maatwebsite\Excel\Concerns\FromArray;
-use Maatwebsite\Excel\Concerns\WithHeadings;
+use App\Contracts\ExcelExport;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class PccTemplateExport implements FromArray, WithHeadings
+class PccTemplateExport implements ExcelExport
 {
     public function headings(): array
     {
@@ -32,8 +32,13 @@ class PccTemplateExport implements FromArray, WithHeadings
         ];
     }
 
-    public function array(): array
+    public function data(): array
     {
-        return []; // empty template
+        return [];
+    }
+
+    public function styles(Worksheet $sheet): void
+    {
+        // No custom styling required for the plain template.
     }
 }
