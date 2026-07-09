@@ -4,20 +4,28 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\On;
 use App\Notifications\PrintJobComplete;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Carbon;
 
 new class extends Component {
 
-    public bool $showModal = false;
+    public bool $showSection = false;
     public bool $isProcessing = false;
+    public bool $isCompleted = false;
+    public bool $hasError = false;
+    public bool $hasTimedOut = false;
+
     public ?string $downloadUrl = null;
     public ?string $statusMessage = null;
 
     public int $progressPercent = 0;
     public string $progressStatus = 'processing';
 
+    public int $processedCount = 0;
+    public int $totalCount = 0;
+    public ?string $estimatedCompletion = null;
+
     public int $pollCount = 0;
     public int $maxPolls = 60;
-    public bool $hasTimedOut = false;
     public ?string $startedAt = null;
 
     /**
@@ -40,7 +48,7 @@ new class extends Component {
             return;
         }
 
-        // Jika job berjalan sync atau worker sudah selesai sebelum modal dibuka,
+        // Jika job berjalan sync atau worker sudah selesai sebelum section dibuka,
         // langsung tampilkan hasil tanpa menghapus notifikasi yang baru dibuat.
         if ($this->detectCompletion()) {
             return;
@@ -53,17 +61,21 @@ new class extends Component {
             ->update(['read_at' => now()]);
 
         $this->reset([
-            'isProcessing', 'downloadUrl', 'statusMessage',
+            'isProcessing', 'isCompleted', 'hasError', 'hasTimedOut',
+            'downloadUrl', 'statusMessage',
             'progressPercent', 'progressStatus',
-            'pollCount', 'hasTimedOut', 'startedAt',
+            'processedCount', 'totalCount', 'estimatedCompletion',
+            'pollCount', 'startedAt',
         ]);
 
         $this->isProcessing = true;
         $this->progressStatus = 'processing';
         $this->progressPercent = 0;
+        $this->processedCount = 0;
+        $this->totalCount = 0;
         $this->statusMessage = __('Preparing print job...');
         $this->startedAt = now()->toDateTimeString();
-        $this->showModal = true;
+        $this->showSection = true;
 
         $this->checkProgress();
     }
@@ -164,7 +176,10 @@ new class extends Component {
 
         $this->progressStatus = $progress['status'] ?? 'processing';
         $this->progressPercent = $progress['progress'] ?? 0;
-        $this->statusMessage = $progress['message'] ?? $this->statusMessage;
+        $this->processedCount = $progress['processed_count'] ?? 0;
+        $this->totalCount = $progress['total_count'] ?? 0;
+        $this->statusMessage = $this->resolveStatusMessage($progress['message'] ?? $this->statusMessage);
+        $this->estimatedCompletion = $this->calculateEta($progress['job_started_at'] ?? null);
 
         if (in_array($this->progressStatus, ['completed', 'failed'], true)) {
             $this->applyCompletion(
@@ -175,7 +190,59 @@ new class extends Component {
     }
 
     /**
-     * Deteksi timeout agar modal tidak berputar selamanya.
+     * Map pesan status job ke label yang lebih user-friendly.
+     */
+    private function resolveStatusMessage(?string $message): string
+    {
+        return match ($message) {
+            'Memvalidasi data...' => __('Preparing data'),
+            'Mengambil data...' => __('Fetching data'),
+            'Menyiapkan label...' => __('Preparing labels'),
+            'Membuat PDF...' => __('Generating PDF'),
+            'File PDF Anda telah siap.' => __('Print completed successfully'),
+            default => $message ?: __('Processing...'),
+        };
+    }
+
+    /**
+     * Hitung estimasi waktu selesai berdasarkan progress saat ini.
+     */
+    private function calculateEta(?string $jobStartedAt): ?string
+    {
+        if (! $jobStartedAt || $this->progressPercent <= 0 || $this->progressPercent >= 100) {
+            return null;
+        }
+
+        try {
+            $started = Carbon::parse($jobStartedAt);
+        } catch (\Exception) {
+            return null;
+        }
+
+        $elapsedSeconds = (float) now()->diffInSeconds($started);
+
+        if ($elapsedSeconds <= 0) {
+            return null;
+        }
+
+        $totalEstimatedSeconds = ($elapsedSeconds / $this->progressPercent) * 100;
+        $remainingSeconds = max(0, (int) round($totalEstimatedSeconds - $elapsedSeconds));
+
+        if ($remainingSeconds < 60) {
+            return __('~:seconds seconds remaining', ['seconds' => $remainingSeconds]);
+        }
+
+        $minutes = (int) floor($remainingSeconds / 60);
+        $seconds = $remainingSeconds % 60;
+
+        return __('~:minutes min :seconds sec remaining', [
+            'minutes' => $minutes,
+            'seconds' => sprintf('%02d', $seconds),
+        ]);
+    }
+
+    /**
+     * Deteksi timeout agar section tidak berputar selamanya.
      */
     private function checkTimeout(): void
     {
@@ -196,111 +263,138 @@ new class extends Component {
     {
         $this->isProcessing = false;
         $this->downloadUrl = $downloadUrl;
-        $this->statusMessage = $message;
+        $this->statusMessage = $this->resolveStatusMessage($message);
         $this->progressPercent = 100;
         $this->progressStatus = $downloadUrl ? 'completed' : 'failed';
-        $this->showModal = true;
+        $this->isCompleted = (bool) $downloadUrl;
+        $this->hasError = ! $downloadUrl;
+        $this->estimatedCompletion = null;
+        $this->showSection = true;
+
+        if ($this->isCompleted) {
+            $this->dispatch('print-job-finished');
+        }
     }
 
     /**
-     * Menutup modal dan reset state.
+     * Sembunyikan progress section.
      */
-    public function closeModal(): void
+    public function hideProgressSection(): void
     {
-        $this->showModal = false;
+        $this->showSection = false;
         $this->isProcessing = false;
+        $this->isCompleted = false;
+        $this->hasError = false;
+        $this->hasTimedOut = false;
         $this->downloadUrl = null;
         $this->statusMessage = null;
         $this->progressPercent = 0;
         $this->progressStatus = 'processing';
+        $this->processedCount = 0;
+        $this->totalCount = 0;
+        $this->estimatedCompletion = null;
         $this->pollCount = 0;
-        $this->hasTimedOut = false;
         $this->startedAt = null;
+    }
+
+    /**
+     * Minta parent untuk mengulang proses print dengan data terakhir.
+     */
+    public function retry(): void
+    {
+        $this->hideProgressSection();
+        $this->dispatch('print-job-retry');
     }
 }; ?>
 
 <div>
-    <x-modal wire:model="showModal"
-             :title="$isProcessing ? __('Creating labels...') : ($hasTimedOut ? __('Still Processing') : __('Print Finished!'))"
-             class="!p-0"
-             persistent
-             separator>
+    @if ($showSection)
+        <x-card class="mb-4 overflow-hidden" wire:transition>
+            <div class="flex flex-col gap-4" @if ($isProcessing) wire:poll.2000ms="checkStatus" @endif>
+                {{-- Header --}}
+                <div class="flex items-start justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        @if ($isProcessing)
+                            <x-loading class="loading-spinner loading-sm text-primary" />
+                            <span class="font-semibold text-base-content">{{ __('Printing in progress') }}</span>
+                        @elseif ($isCompleted)
+                            <x-icon name="o-check-circle" class="w-6 h-6 text-success shrink-0" />
+                            <span class="font-semibold text-success">{{ __('Print completed successfully') }}</span>
+                        @elseif ($hasError)
+                            <x-icon name="o-exclamation-triangle" class="w-6 h-6 text-error shrink-0" />
+                            <span class="font-semibold text-error">{{ __('Print failed') }}</span>
+                        @elseif ($hasTimedOut)
+                            <x-icon name="o-clock" class="w-6 h-6 text-warning shrink-0" />
+                            <span class="font-semibold text-warning">{{ __('Still processing') }}</span>
+                        @endif
+                    </div>
 
-        @if ($isProcessing)
-            <div class="p-6 flex flex-col items-center justify-center space-y-4" wire:poll.2000ms="checkStatus">
-                <svg class="animate-spin h-10 w-10 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-
-                <div class="text-lg font-semibold text-base-content">
-                    {{ __('Creating labels...') }}
+                    <x-button
+                        icon="o-x-mark"
+                        class="btn-ghost btn-sm btn-circle"
+                        wire:click="hideProgressSection"
+                        aria-label="{{ __('Close') }}" />
                 </div>
 
-                @if ($progressPercent > 0)
-                    <div class="w-full max-w-xs">
-                        <div class="flex justify-between text-xs text-base-content/70 mb-1">
-                            <span>{{ $statusMessage }}</span>
-                            <span>{{ $progressPercent }}%</span>
-                        </div>
-                        <div class="w-full bg-base-300 rounded-full h-2">
-                            <div class="bg-primary h-2 rounded-full transition-all duration-500" style="width: {{ $progressPercent }}%"></div>
-                        </div>
+                {{-- Progress bar --}}
+                <div class="w-full">
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-base-content/80">{{ $statusMessage }}</span>
+                        <span class="font-medium text-base-content">{{ $progressPercent }}%</span>
                     </div>
-                @else
-                    <div class="text-sm text-base-content/70">
-                        {{ $statusMessage ?: __('Please wait, the process may take a few moments.') }}
+                    <div class="w-full bg-base-300 rounded-full h-2.5">
+                        <div
+                            class="h-2.5 rounded-full transition-all duration-500
+                                {{ $hasError || $hasTimedOut ? 'bg-error' : ($isCompleted ? 'bg-success' : 'bg-primary') }}"
+                            style="width: {{ $progressPercent }}%"></div>
                     </div>
-                @endif
+                </div>
 
-                <div class="text-xs text-info">
-                    {{ __('Status will be updated automatically.') }}
+                {{-- Stats --}}
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-base-content/70">
+                    @if ($totalCount > 0)
+                        <div class="flex items-center gap-2">
+                            <x-icon name="o-document-text" class="w-4 h-4" />
+                            <span>{{ $processedCount }} / {{ $totalCount }} {{ __('records processed') }}</span>
+                        </div>
+                    @endif
+
+                    @if ($estimatedCompletion && $isProcessing)
+                        <div class="flex items-center gap-2">
+                            <x-icon name="o-clock" class="w-4 h-4" />
+                            <span>{{ $estimatedCompletion }}</span>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Actions --}}
+                <div class="flex flex-wrap items-center gap-2 pt-2">
+                    @if ($downloadUrl)
+                        <a href="{{ $downloadUrl }}" target="_blank" class="btn btn-success btn-sm" @click="$wire.hideProgressSection()">
+                            <x-icon name="o-arrow-down-tray" class="w-4 h-4" />
+                            {{ __('Download File') }}
+                        </a>
+                    @endif
+
+                    @if ($hasError)
+                        <x-button
+                            :label="__('Retry')"
+                            icon="o-arrow-path"
+                            class="btn-error btn-sm"
+                            wire:click="retry"
+                            spinner="retry" />
+                    @endif
+
+                    @if ($hasTimedOut)
+                        <x-button
+                            :label="__('Check now')"
+                            icon="o-magnifying-glass"
+                            class="btn-primary btn-sm"
+                            wire:click="checkStatus"
+                            spinner="checkStatus" />
+                    @endif
                 </div>
             </div>
-        @else
-            <div class="p-6 flex flex-col items-center justify-center space-y-4">
-                @if ($downloadUrl)
-                    <x-icon name="o-check-circle" class="w-12 h-12 text-success" />
-                    <div class="text-lg font-semibold text-base-content">
-                        {{ __('Your File is Ready to Download.') }}
-                    </div>
-                    <div class="text-sm text-base-content/70 text-center">
-                        {{ $statusMessage ?: __('Click the button below to download the document.') }}
-                    </div>
-                @elseif ($hasTimedOut)
-                    <x-icon name="o-clock" class="w-12 h-12 text-warning" />
-                    <div class="text-lg font-semibold text-warning">
-                        {{ __('Still Processing') }}
-                    </div>
-                    <div class="text-sm text-base-content/70 text-center">
-                        {{ $statusMessage }}
-                    </div>
-                @else
-                    <x-icon name="o-exclamation-triangle" class="w-12 h-12 text-error" />
-                    <div class="text-lg font-semibold text-error">
-                        {{ __('An Error Occurred!') }}
-                    </div>
-                    <div class="text-sm text-base-content/70 text-center">
-                        {{ $statusMessage ?: __('File creation failed due to internal issues.') }}
-                    </div>
-                @endif
-            </div>
-        @endif
-
-        <x-slot:actions>
-            @if ($isProcessing)
-                <x-button :label="__('Close')" wire:click="closeModal" class="btn-ghost" />
-                <x-button :label="__('Check now')" wire:click="checkStatus" class="btn-primary" spinner="checkStatus" />
-            @else
-                @if ($downloadUrl)
-                    <a href="{{ $downloadUrl }}" target="_blank" class="btn btn-primary" @click="$wire.closeModal()">
-                        <x-icon name="o-arrow-down-tray" class="w-5 h-5" />
-                        {{ __('Download File') }}
-                    </a>
-                @endif
-
-                <x-button :label="__('Close')" wire:click="closeModal" class="btn-ghost" />
-            @endif
-        </x-slot:actions>
-    </x-modal>
+        </x-card>
+    @endif
 </div>

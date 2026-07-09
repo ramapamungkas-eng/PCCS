@@ -11,6 +11,7 @@ use Livewire\WithFileUploads;
 use Livewire\Attributes\Validate;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Mary\Traits\Toast;
 use App\Support\Excel;
 use App\Imports\HpmPccImport;
@@ -38,6 +39,12 @@ class extends Component {
     | Properti Seleksi Data
     |-------------------------------------------------------------------------- */
     public array  $selectedIds         = [];
+
+    /* ----------
+    | Properti Print Progress
+    |-------------------------------------------------------------------------- */
+    public bool   $isPrinting          = false;
+    public array  $lastPrintIds        = [];
 
     /* ----------
     | Properti Modal Import
@@ -402,6 +409,9 @@ class extends Component {
             return;
         }
 
+        $this->isPrinting = true;
+        $this->lastPrintIds = $this->selectedIds;
+
         $user = auth()->user();
         if (!$user) {
             $this->error(__('User not authenticated.'), null, 'toast-top toast-end');
@@ -443,6 +453,7 @@ class extends Component {
         ]);
 
         if (empty($validIds)) {
+            $this->isPrinting = false;
             $this->error(__('No valid data selected to print.'), null, 'toast-top toast-end');
             Log::warning("⚠️ Tidak ada ID valid ditemukan untuk dicetak", [
                 'selected_ids_sample' => array_slice($idsToProcess, 0, 10),
@@ -483,13 +494,14 @@ class extends Component {
                 );
             }
 
-            // 5. Kirim event untuk menampilkan modal 'processing'
+            // 5. Kirim event untuk menampilkan section 'processing'
             $this->dispatch('print-job-started');
 
             // 6. Reset seleksi SETELAH job berhasil dikirim
             $this->selectedIds = [];
 
         } catch (\Exception $e) {
+            $this->isPrinting = false;
             // Log detailed error for debugging
             Log::error("❌ Gagal dispatch print job", [
                 'user_id' => $user->id,
@@ -501,6 +513,29 @@ class extends Component {
             // Show generic error to user
             $this->error(__('An error occurred while processing print job. Please try again.'), null, 'toast-top toast-end');
         }
+    }
+
+    /**
+     * Tangani event retry dari komponen print-notifier.
+     * Gunakan ID terakhir yang dipilih jika tidak ada seleksi aktif.
+     */
+    #[On('print-job-retry')]
+    public function retryPrint(): void
+    {
+        if (empty($this->selectedIds) && ! empty($this->lastPrintIds)) {
+            $this->selectedIds = $this->lastPrintIds;
+        }
+
+        $this->bulkPrint();
+    }
+
+    /**
+     * Nonaktifkan indikator printing saat job selesai atau gagal.
+     */
+    #[On('print-job-finished')]
+    public function finishPrinting(): void
+    {
+        $this->isPrinting = false;
     }
 }
 ?>
@@ -532,6 +567,9 @@ class extends Component {
         </x-slot:actions>
     </x-card>
 
+    {{-- Print Progress Section --}}
+    <livewire:components.ui.print-notifier />
+
     {{-- TABLE --}}
     <x-card :title="__('Data Records')" shadow separator>
         {{-- Indikator loading untuk 'selectedIds' atau 'bulkPrint' --}}
@@ -546,7 +584,7 @@ class extends Component {
                     wire:click="bulkPrint"
                     class="btn-success"
                     spinner="bulkPrint"
-                    wire:loading.attr="disabled"
+                    :disabled="$isPrinting"
                     :badge="$selectedCount"
                     badge-classes="badge-warning"
                     responsive />
@@ -703,9 +741,6 @@ class extends Component {
             @endif
         </x-slot:actions>
     </x-modal>
-
-    {{-- Komponen Notifier (Sudah diperbaiki) --}}
-    <livewire:components.ui.print-notifier />
 
     {{-- Script untuk refresh CSRF token dan handle errors --}}
     @script

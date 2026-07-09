@@ -6,6 +6,7 @@ use App\Models\Customer\HPM\Pcc;
 use App\Models\User;
 use App\Notifications\PrintJobComplete;
 use App\Services\PlaywrightPdfService;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -50,45 +51,48 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
     {
         ini_set('memory_limit', '512M');
 
+        $jobStartedAt = now();
+
         try {
-            $this->setProgress('processing', 0, 'Memvalidasi data...');
+            $this->setProgress('processing', 0, 'Memvalidasi data...', null, 0, 0, $jobStartedAt);
 
             $validIds = $this->validateAndFilterIds();
+            $totalRecords = count($validIds);
 
             if (empty($validIds)) {
-                $this->notifyAndAbort('Tidak ada data yang valid untuk dicetak.');
+                $this->notifyAndAbort('Tidak ada data yang valid untuk dicetak.', 0, $totalRecords);
 
                 return;
             }
 
-            $this->setProgress('processing', 10, 'Mengambil data...');
+            $this->setProgress('processing', 10, 'Mengambil data...', null, 0, $totalRecords, $jobStartedAt);
 
             $dataToPrint = $this->fetchData($validIds);
 
             if ($dataToPrint->isEmpty()) {
-                $this->notifyAndAbort('Tidak ada data yang ditemukan sesuai kriteria.');
+                $this->notifyAndAbort('Tidak ada data yang ditemukan sesuai kriteria.', 0, $totalRecords);
 
                 return;
             }
 
-            $this->setProgress('processing', 30, 'Menyiapkan label...');
+            $this->setProgress('processing', 30, 'Menyiapkan label...', null, 0, $totalRecords, $jobStartedAt);
 
-            [$labels, $skippedCount] = $this->mapLabels($dataToPrint);
+            [$labels, $skippedCount] = $this->mapLabels($dataToPrint, $totalRecords, $jobStartedAt);
 
             if (empty($labels)) {
-                $this->notifyAndAbort('Tidak ada label valid yang bisa diproses.');
+                $this->notifyAndAbort('Tidak ada label valid yang bisa diproses.', $totalRecords, $totalRecords);
 
                 return;
             }
 
-            $this->setProgress('processing', 50, 'Membuat PDF...');
+            $this->setProgress('processing', 50, 'Membuat PDF...', null, $totalRecords, $totalRecords, $jobStartedAt);
 
             $storagePath = $this->generatePdf($labels);
             $this->verifyPdfFile($storagePath);
 
             $downloadUrl = Storage::disk('public')->url($storagePath);
 
-            $this->setProgress('completed', 100, 'File PDF Anda telah siap.', $downloadUrl);
+            $this->setProgress('completed', 100, 'File PDF Anda telah siap.', $downloadUrl, $totalRecords, $totalRecords, $jobStartedAt);
             $this->user->notify(new PrintJobComplete($downloadUrl, 'File PDF Anda telah siap. Klik untuk mengunduh.'));
 
             Log::info('PrintLabelsPCC Completed', [
@@ -123,12 +127,17 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
             ->get();
     }
 
-    private function mapLabels($dataToPrint): array
+    private function mapLabels($dataToPrint, int $totalRecords, Carbon $jobStartedAt): array
     {
         $labels = [];
         $skippedCount = 0;
+        $processedCount = 0;
+        $totalItems = $dataToPrint->count();
+        $progressReportInterval = max(1, (int) round($totalItems / 10));
 
         foreach ($dataToPrint as $item) {
+            $processedCount++;
+
             try {
                 $barcodeData = $this->sanitizeBarcode($item->slip_barcode ?? '');
 
@@ -142,6 +151,19 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
 
             } catch (\Exception $e) {
                 $skippedCount++;
+            }
+
+            if ($processedCount % $progressReportInterval === 0 || $processedCount === $totalItems) {
+                $progressInMappingPhase = (int) round(30 + (($processedCount / $totalItems) * 20));
+                $this->setProgress(
+                    'processing',
+                    $progressInMappingPhase,
+                    'Menyiapkan label...',
+                    null,
+                    $processedCount,
+                    $totalRecords,
+                    $jobStartedAt
+                );
             }
         }
 
@@ -229,10 +251,10 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function notifyAndAbort(string $message): void
+    private function notifyAndAbort(string $message, int $processedCount = 0, int $totalCount = 0): void
     {
         Log::warning("PrintLabelsPCC Aborted: {$message}", ['user_id' => $this->user->id]);
-        $this->setProgress('failed', 100, $message);
+        $this->setProgress('failed', 100, $message, null, $processedCount, $totalCount, now());
         $this->user->notify(new PrintJobComplete(null, $message));
     }
 
@@ -256,12 +278,19 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
             ? 'Terjadi kesalahan pada sistem PDF Generator. Silakan hubungi IT.'
             : 'Gagal membuat PDF. Silakan coba lagi nanti.';
 
-        $this->setProgress('failed', 100, $userMessage);
+        $this->setProgress('failed', 100, $userMessage, null, 0, 0, now());
         $this->user->notify(new PrintJobComplete(null, $userMessage));
     }
 
-    private function setProgress(string $status, int $progress, string $message, ?string $downloadUrl = null): void
-    {
+    private function setProgress(
+        string $status,
+        int $progress,
+        string $message,
+        ?string $downloadUrl = null,
+        int $processedCount = 0,
+        int $totalCount = 0,
+        ?Carbon $jobStartedAt = null,
+    ): void {
         // Gunakan store yang persisten agar progress bisa dibaca antar request.
         Cache::store(config('app.print_progress_cache_store'))->put(
             "print-progress:{$this->user->id}",
@@ -270,6 +299,9 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
                 'progress' => $progress,
                 'message' => $message,
                 'download_url' => $downloadUrl,
+                'processed_count' => $processedCount,
+                'total_count' => $totalCount,
+                'job_started_at' => $jobStartedAt?->toDateTimeString(),
                 'updated_at' => now()->toDateTimeString(),
             ],
             now()->addMinutes(10)
