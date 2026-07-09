@@ -3,12 +3,13 @@
 namespace App\Models\Customer\HPM;
 
 use App\Models\Traits\HasUlid;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Schedule extends Model
 {
-    use HasUlid;
+    use HasFactory, HasUlid;
 
     protected $table = 'hpm_schedules';
 

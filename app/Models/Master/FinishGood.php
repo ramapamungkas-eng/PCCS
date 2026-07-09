@@ -2,17 +2,17 @@
 
 namespace App\Models\Master;
 
+use App\Models\Customer\HPM\CCP;
+use App\Models\Customer\HPM\Pcc;
 use App\Models\Traits\HasUlid;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Models\Customer\HPM\Pcc;
-use App\Models\Customer\HPM\CCP;
-use App\Models\Master\Customer;
 
 class FinishGood extends Model
 {
-    use HasUlid;
+    use HasFactory, HasUlid;
 
     protected $table = 'finish_goods';
 

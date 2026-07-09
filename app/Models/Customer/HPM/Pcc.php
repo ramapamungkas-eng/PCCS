@@ -2,17 +2,20 @@
 
 namespace App\Models\Customer\HPM;
 
-use App\Models\Traits\HasUlid;
 use App\Models\Master\FinishGood;
+use App\Models\Traits\HasUlid;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
-use App\Models\Customer\HPM\PccEvent;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\DB;
 
 class Pcc extends Model
 {
-    use HasUlid;
+    use HasFactory, HasUlid;
 
     protected $table = 'pccs';
 
@@ -45,10 +48,10 @@ class Pcc extends Model
         'date' => 'date:Y-m-d',
         'time' => 'string',
     ];
-    
+
     protected $appends = ['effective_date', 'effective_time'];
 
-    /** 
+    /**
      * Relasi ke model FinishGood via alias.
      * pccs.part_no = finish_goods.alias
      */
@@ -84,6 +87,20 @@ class Pcc extends Model
         );
     }
 
+    /**
+     * Scope that joins the schedule and exposes effective_date_alias and
+     * effective_time_alias so callers can filter/order by effective date/time
+     * directly in SQL without loading every record into memory.
+     */
+    public function scopeWithEffectiveDate(Builder $query): Builder
+    {
+        return $query->leftJoin('hpm_schedules', 'pccs.slip_no', '=', 'hpm_schedules.slip_number')
+            ->select('pccs.*',
+                DB::raw('COALESCE(hpm_schedules.adjusted_date, hpm_schedules.schedule_date, pccs.date) as effective_date_alias'),
+                DB::raw('COALESCE(hpm_schedules.adjusted_time, hpm_schedules.schedule_time, pccs.time) as effective_time_alias')
+            );
+    }
+
     /** Effective Date — ambil dari schedule kalau ada, kalau tidak pakai date dari PCC */
     public function getEffectiveDateAttribute()
     {
@@ -91,13 +108,13 @@ class Pcc extends Model
             // Prioritaskan adjusted_date kalau ada, lalu schedule_date
             $date = $this->schedule->adjusted_date ?? $this->schedule->schedule_date;
             if ($date) {
-                return $date instanceof \Carbon\Carbon ? $date->format('Y-m-d') : $date;
+                return $date instanceof Carbon ? $date->format('Y-m-d') : $date;
             }
         }
 
         // Fallback to PCC's own date
         if ($this->date) {
-            return $this->date instanceof \Carbon\Carbon ? $this->date->format('Y-m-d') : $this->date;
+            return $this->date instanceof Carbon ? $this->date->format('Y-m-d') : $this->date;
         }
 
         return null;
@@ -111,15 +128,16 @@ class Pcc extends Model
             $time = $this->schedule->adjusted_time ?? $this->schedule->schedule_time;
             if ($time) {
                 // Schedule times are cast as datetime, extract time portion
-                if ($time instanceof \Carbon\Carbon) {
+                if ($time instanceof Carbon) {
                     return $time->format('H:i:s');
                 }
                 // If string, ensure it's in H:i:s format
                 if (is_string($time)) {
                     // Could be '08:00:00' or '1970-01-01 08:00:00'
                     if (strlen($time) > 8) {
-                        return \Carbon\Carbon::parse($time)->format('H:i:s');
+                        return Carbon::parse($time)->format('H:i:s');
                     }
+
                     return $time;
                 }
             }
@@ -127,9 +145,10 @@ class Pcc extends Model
 
         // Fallback to PCC's own time
         if ($this->time) {
-            if ($this->time instanceof \Carbon\Carbon) {
+            if ($this->time instanceof Carbon) {
                 return $this->time->format('H:i:s');
             }
+
             return $this->time;
         }
 

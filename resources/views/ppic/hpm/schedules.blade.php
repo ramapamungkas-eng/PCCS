@@ -4,7 +4,7 @@ use Livewire\Volt\Component;
 use App\Models\Customer\HPM\Schedule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
+use App\Support\CacheHelper;
 use Illuminate\Support\Facades\Storage;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
@@ -77,15 +77,15 @@ class extends Component {
     #[Computed]
     public function headers(): array
     {
-        return Cache::remember('schedule_table_headers', 3600, function() {
+        return CacheHelper::rememberTagged(['schedule_ui'], 'schedule_table_headers', 3600, function() {
             return [
-                ['key' => 'slip_number',          'label' => 'Slip Number',       'sortable' => true],
-                ['key' => 'schedule_date',        'label' => 'Schedule Date',     'sortable' => true],
-                ['key' => 'adjusted_date',        'label' => 'Adjusted Date',     'sortable' => true],
-                ['key' => 'schedule_time',        'label' => 'Schedule Time',     'sortable' => true],
-                ['key' => 'adjusted_time',        'label' => 'Adjusted Time',     'sortable' => true],
-                ['key' => 'delivery_quantity',    'label' => 'Delivery Qty',      'sortable' => true],
-                ['key' => 'adjustment_quantity',  'label' => 'Adjustment Qty',    'sortable' => true],
+                ['key' => 'slip_number',          'label' => __('Slip Number'),       'sortable' => true],
+                ['key' => 'schedule_date',        'label' => __('Schedule Date'),     'sortable' => true],
+                ['key' => 'adjusted_date',        'label' => __('Adjusted Date'),     'sortable' => true],
+                ['key' => 'schedule_time',        'label' => __('Schedule Time'),     'sortable' => true],
+                ['key' => 'adjusted_time',        'label' => __('Adjusted Time'),     'sortable' => true],
+                ['key' => 'delivery_quantity',    'label' => __('Delivery Qty'),      'sortable' => true],
+                ['key' => 'adjustment_quantity',  'label' => __('Adjustment Qty'),    'sortable' => true],
             ];
         });
     }
@@ -144,8 +144,9 @@ class extends Component {
     {
         // Cache detail view for 10 minutes (600 seconds)
         $cacheKey = "schedule_detail_{$id}";
-        
-        $this->selectedData = Cache::remember($cacheKey, 600, function() use ($id) {
+        $tags = ['schedule_details', "schedule_{$id}"];
+
+        $this->selectedData = CacheHelper::rememberTagged($tags, $cacheKey, 600, function() use ($id) {
             return Schedule::withCount('pccs')
                 ->with(['pccs' => function($query) {
                     // Select both slip_barcode and kd_lot_no; display will prefer slip_barcode and fallback to kd_lot_no
@@ -158,7 +159,7 @@ class extends Component {
         if ($this->selectedData) {
             $this->detailsModal = true;
         } else {
-            $this->warning("Data not found", null, 'toast-top toast-end');
+            $this->warning(__('Data not found.'), null, 'toast-top toast-end');
         }
     }
 
@@ -175,7 +176,7 @@ class extends Component {
             $schedule = Schedule::find($id);
             
             if (!$schedule) {
-                $this->error('Schedule not found', null, 'toast-top toast-end');
+                $this->error(__('Schedule not found.'), null, 'toast-top toast-end');
                 return;
             }
 
@@ -183,7 +184,7 @@ class extends Component {
             $pccsCount = $schedule->pccs()->count();
             if ($pccsCount > 0) {
                 $this->warning(
-                    "Cannot delete schedule. It has {$pccsCount} related PCC record(s).",
+                    __('Cannot delete schedule. It has :count related PCC record(s).', ['count' => $pccsCount]),
                     null,
                     'toast-top toast-end'
                 );
@@ -194,7 +195,7 @@ class extends Component {
             $schedule->delete();
 
             // Clear caches
-            Cache::forget("schedule_detail_{$id}");
+            CacheHelper::flushTagged(["schedule_{$id}", 'schedule_details']);
             $this->clearQueryCache();
 
             Log::info("✅ Schedule deleted", ['slip_number' => $slipNumber, 'id' => $id]);
@@ -220,7 +221,7 @@ class extends Component {
     public function bulkDelete(): void
     {
         if (empty($this->selectedIds)) {
-            $this->warning('No schedules selected', null, 'toast-top toast-end');
+            $this->warning(__('No schedules selected.'), null, 'toast-top toast-end');
             return;
         }
 
@@ -232,7 +233,7 @@ class extends Component {
 
             if ($schedulesWithPccs > 0) {
                 $this->warning(
-                    "{$schedulesWithPccs} schedule(s) cannot be deleted because they have related PCC records.",
+                    __(':count schedule(s) cannot be deleted because they have related PCC records.', ['count' => $schedulesWithPccs]),
                     null,
                     'toast-top toast-end'
                 );
@@ -240,17 +241,16 @@ class extends Component {
             }
 
             $count = Schedule::whereIn('id', $this->selectedIds)->delete();
-            
+
             // Clear caches
-            foreach ($this->selectedIds as $id) {
-                Cache::forget("schedule_detail_{$id}");
-            }
+            $detailTags = array_map(fn ($id) => "schedule_{$id}", $this->selectedIds);
+            CacheHelper::flushTagged(array_merge($detailTags, ['schedule_details']));
             $this->clearQueryCache();
 
             $this->selectedIds = [];
-            
-            Log::info("✅ Bulk delete schedules", ['count' => $count]);
-            $this->success("{$count} schedule(s) deleted successfully", null, 'toast-top toast-end');
+
+            Log::info('✅ Bulk delete schedules', ['count' => $count]);
+            $this->success(__(' :count schedule(s) deleted successfully.', ['count' => $count]), null, 'toast-top toast-end');
 
         } catch (\Exception $e) {
             // Log detailed error for debugging
@@ -287,7 +287,7 @@ class extends Component {
      */
     private function clearQueryCache(): void
     {
-        Cache::flush();
+        CacheHelper::flushTagged(['schedule_queries', 'schedule_ui']);
     }
 
     /* ----------
@@ -364,7 +364,7 @@ class extends Component {
         $this->validate();
 
         if (!$this->importFile) {
-            $this->warning('Please upload a file', null, 'toast-top toast-end');
+            $this->warning(__('Please upload a file.'), null, 'toast-top toast-end');
             return;
         }
 
@@ -402,18 +402,19 @@ class extends Component {
             Log::info("✅ Schedule import completed", array_merge($this->summary, ['total_in_db' => $totalInDb]));
 
             $this->success(
-                sprintf('Import completed! Total: %d, Unique: %d, Updated: %d. Records in DB: %d',
-                    $this->summary['total'],
-                    $this->summary['unique'],
-                    $this->summary['updated'],
-                    $totalInDb
-                ),
+                __('Import completed! Total: :total, Unique: :unique, Updated: :updated. Records in DB: :records', [
+                    'total' => $this->summary['total'],
+                    'unique' => $this->summary['unique'],
+                    'updated' => $this->summary['updated'],
+                    'records' => $totalInDb,
+                ]),
                 null,
                 'toast-top toast-end'
             );
 
             // Clear cache after successful import
             $this->clearQueryCache();
+            CacheHelper::flushTagged(['schedule_details']);
             
             $this->closeImportModal();
             $this->resetPage();
@@ -515,22 +516,22 @@ class extends Component {
 
             {{-- Format Schedule Date --}}
             @scope('cell_schedule_date', $data)
-                {{ $data->schedule_date ? $data->schedule_date->format('d/m/Y') : '-' }}
+                <x-format.date :value="$data->schedule_date" />
             @endscope
 
             {{-- Format Adjusted Date --}}
             @scope('cell_adjusted_date', $data)
-                {{ $data->adjusted_date ? $data->adjusted_date->format('d/m/Y') : '-' }}
+                <x-format.date :value="$data->adjusted_date" />
             @endscope
 
             {{-- Format Schedule Time --}}
             @scope('cell_schedule_time', $data)
-                {{ $data->schedule_time ? substr($data->schedule_time, 0, 5) : '-' }}
+                <x-format.time :value="$data->schedule_time" />
             @endscope
 
             {{-- Format Adjusted Time --}}
             @scope('cell_adjusted_time', $data)
-                {{ $data->adjusted_time ? substr($data->adjusted_time, 0, 5) : '-' }}
+                <x-format.time :value="$data->adjusted_time" />
             @endscope
 
             {{-- Actions Column --}}
@@ -556,74 +557,62 @@ class extends Component {
     <x-modal wire:model="showImportModal" :title="__('Import Schedule Data')" class="backdrop-blur" persistent separator>
         <div class="space-y-6">
             <x-alert :title="__('Information')" icon="o-information-circle" class="alert-info">
-                <p>Ensure your Excel file uses the correct template. The 'slip_number' column is required. If a slip number already exists, its schedule will be updated.</p>
+                <p>{{ __('Ensure your Excel file uses the correct template. The :column column is required. If a slip number already exists, its schedule will be updated.', ['column' => "'slip_number'"]) }}</p>
             </x-alert>
-            
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {{-- Download Template --}}
-                <div class="flex flex-col space-y-3 p-4 border rounded-lg">
-                    <div class="flex items-center space-x-2">
-                        <span class="badge badge-primary badge-lg">1</span>
-                        <h3 class="font-semibold text-lg">{{ __('Download Template') }}</h3>
-                    </div>
-                    <p class="text-sm text-base-content/70">Download the official Excel template to ensure correct data format.</p>
-                    <x-button 
-                        :label="__('Download Template')" 
-                        icon="o-arrow-down-tray" 
-                        wire:click="downloadTemplate" 
-                        spinner="downloadTemplate" 
+                <x-import.step :number="1" :title="__('Download Template')" :description="__('Download the official Excel template to ensure correct data format.')">
+                    <x-button
+                        :label="__('Download Template')"
+                        icon="o-arrow-down-tray"
+                        wire:click="downloadTemplate"
+                        spinner="downloadTemplate"
                         class="btn-info" />
-                </div>
-                
-                {{-- Upload File --}}
-                <div class="flex flex-col space-y-3 p-4 border rounded-lg">
-                    <div class="flex items-center space-x-2">
-                        <span class="badge badge-primary badge-lg">2</span>
-                        <h3 class="font-semibold text-lg">{{ __('Upload Your Data') }}</h3>
-                    </div>
-                    <p class="text-sm text-base-content/70">Upload your completed Excel file (.xlsx, .xls) here.</p>
-                    <x-file 
-                        wire:model="importFile" 
-                        accept=".xlsx,.xls" 
-                        hint="Maximum 5MB, .xlsx or .xls format" />
+                </x-import.step>
+
+                <x-import.step :number="2" :title="__('Upload Your Data')" :description="__('Upload your completed Excel file (.xlsx, .xls) here.')">
+                    <x-file
+                        wire:model="importFile"
+                        accept=".xlsx,.xls"
+                        :hint="__('Maximum 5MB, .xlsx or .xls format')" />
                     @error('importFile')
-                        <x-alert 
-                            :title="__('Validation Error')" 
-                            description="{{ $message }}" 
-                            icon="o-exclamation-triangle" 
+                        <x-alert
+                            :title="__('Validation Error')"
+                            description="{{ $message }}"
+                            icon="o-exclamation-triangle"
                             class="alert-error mt-3" />
                     @enderror
-                </div>
+                </x-import.step>
             </div>
         </div>
-        
+
         <x-slot:actions>
-            <x-button 
-                :label="__('Cancel')" 
-                wire:click="closeImportModal" 
+            <x-button
+                :label="__('Cancel')"
+                wire:click="closeImportModal"
                 class="btn-ghost" />
-            <x-button 
-                :label="__('Import Data')" 
-                class="btn-primary" 
-                wire:click="importSchedules" 
-                spinner="importSchedules" 
+            <x-button
+                :label="__('Import Data')"
+                class="btn-primary"
+                wire:click="importSchedules"
+                spinner="importSchedules"
                 :disabled="!$importFile" />
         </x-slot:actions>
     </x-modal>
 
     {{-- DETAIL MODAL --}}
-    <x-modal wire:model="detailsModal" :title="__('Schedule Details')" class="backdrop-blur" separator>
+    <x-modal wire:model="detailsModal" :title="__('Schedule Details')" class="backdrop-blur" separator wire:key="schedule-detail-modal-{{ $selectedData?->id ?? 'empty' }}">
         @if ($selectedData)
             <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                 {{-- Main Information --}}
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Slip Number') }}</label>
-                        <p class="font-semibold">{{ $selectedData->slip_number }}</p>
+                        <p class="font-semibold">{{ $selectedData->slip_number ?? '-' }}</p>
                     </div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Related PCCs') }}</label>
-                        <p class="font-semibold">{{ $selectedData->pccs_count }} record(s)</p>
+                        <p class="font-semibold">{{ ($selectedData->pccs_count ?? 0) }} {{ __('record(s)') }}</p>
                     </div>
                 </div>
 
@@ -634,19 +623,19 @@ class extends Component {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Schedule Date') }}</label>
-                        <p class="font-semibold">{{ $selectedData->schedule_date?->format('d/m/Y') ?? '-' }}</p>
+                        <p class="font-semibold"><x-format.date :value="$selectedData->schedule_date" /></p>
                     </div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Schedule Time') }}</label>
-                        <p class="font-semibold">{{ $selectedData->schedule_time ?? '-' }}</p>
+                        <p class="font-semibold"><x-format.time :value="$selectedData->schedule_time" /></p>
                     </div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Adjusted Date') }}</label>
-                        <p class="font-semibold">{{ $selectedData->adjusted_date?->format('d/m/Y') ?? '-' }}</p>
+                        <p class="font-semibold"><x-format.date :value="$selectedData->adjusted_date" /></p>
                     </div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Adjusted Time') }}</label>
-                        <p class="font-semibold">{{ $selectedData->adjusted_time ?? '-' }}</p>
+                        <p class="font-semibold"><x-format.time :value="$selectedData->adjusted_time" /></p>
                     </div>
                 </div>
 
@@ -657,11 +646,11 @@ class extends Component {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Delivery Quantity') }}</label>
-                        <p class="font-semibold">{{ number_format($selectedData->delivery_quantity) }}</p>
+                        <p class="font-semibold">{{ number_format($selectedData->delivery_quantity ?? 0) }}</p>
                     </div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Adjustment Quantity') }}</label>
-                        <p class="font-semibold">{{ number_format($selectedData->adjustment_quantity) }}</p>
+                        <p class="font-semibold">{{ number_format($selectedData->adjustment_quantity ?? 0) }}</p>
                     </div>
                 </div>
 
@@ -682,8 +671,8 @@ class extends Component {
                                 @foreach($selectedData->pccs as $pcc)
                                     <tr>
                                         <td>{{ $pcc->slip_barcode ?: $pcc->kd_lot_no ?: '-' }}</td>
-                                        <td>{{ $pcc->part_no }}</td>
-                                        <td>{{ $pcc->ship }}</td>
+                                        <td>{{ $pcc->part_no ?? '-' }}</td>
+                                        <td>{{ $pcc->ship ?? '-' }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -696,14 +685,16 @@ class extends Component {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-base-content/50">
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Created At') }}</label>
-                        <p>{{ $selectedData->created_at?->format('d/m/Y H:i:s') ?? '-' }}</p>
+                        <p><x-format.datetime :value="$selectedData->created_at" /></p>
                     </div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Updated At') }}</label>
-                        <p>{{ $selectedData->updated_at?->format('d/m/Y H:i:s') ?? '-' }}</p>
+                        <p><x-format.datetime :value="$selectedData->updated_at" /></p>
                     </div>
                 </div>
             </div>
+        @else
+            <x-alert :title="__('Loading')" :description="__('Fetching schedule details...')" icon="o-arrow-path" class="alert-info" />
         @endif
 
         <x-slot:actions>

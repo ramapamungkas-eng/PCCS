@@ -113,7 +113,7 @@ new class extends Component {
             DB::commit();
 
             $partNumber = $pcc->finishGood->part_number ?? $pcc->part_no;
-            $this->success("? {$partNumber} - {$pcc->slip_no}", null, 'toast-top');
+            $this->success("✓ {$partNumber} - {$pcc->slip_no}", null, 'toast-top');
             $this->dispatch('scan-feedback', type: 'success');
             
             // Notify trace page for live updates
@@ -171,33 +171,12 @@ new class extends Component {
 
         {{-- Recent Scans Section --}}
         <div>
-            <x-card :title="__('Recent Deliveries') . ' (' . count($recentScans) . ')'" shadow>
-                <div class="space-y-2 max-h-[700px] overflow-y-auto">
-                    @forelse($recentScans as $scan)
-                        <div class="p-3 bg-base-200 rounded-lg hover:bg-base-300 transition">
-                            <div class="flex items-start justify-between">
-                                <div class="flex-1">
-                                    <div class="font-semibold text-sm">{{ $scan['slip_no'] }}</div>
-                                    <div class="text-xs text-gray-600">{{ $scan['part_no'] }}</div>
-                                    <div class="text-xs text-gray-500 truncate">{{ $scan['part_name'] }}</div>
-                                    @if($scan['remarks'])
-                                        <div class="text-xs text-blue-600 italic mt-1">{{ $scan['remarks'] }}</div>
-                                    @endif
-                                </div>
-                                <div class="text-right">
-                                    <div class="text-xs text-gray-500">{{ \Carbon\Carbon::parse($scan['timestamp'])->diffForHumans() }}</div>
-                                    <x-badge value="?" class="badge-success badge-sm mt-1" />
-                                </div>
-                            </div>
-                        </div>
-                    @empty
-                        <div class="text-center py-8 text-gray-500">
-                            <x-icon name="o-qr-code" class="w-12 h-12 mx-auto mb-2 opacity-50" />
-                            <p>{{ __('No deliveries yet') }}</p>
-                        </div>
-                    @endforelse
-                </div>
-            </x-card>
+            <x-scanner.recent-scans
+                :recentScans="$recentScans"
+                :title="__('Recent Deliveries')"
+                show-relative
+                badge-icon="o-check"
+                badge-class="badge-success" />
         </div>
     </div>
 

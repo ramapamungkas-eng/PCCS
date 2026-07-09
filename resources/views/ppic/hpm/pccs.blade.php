@@ -4,7 +4,7 @@ use Livewire\Volt\Component;
 use App\Models\Customer\HPM\Pcc;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
+use App\Support\CacheHelper;
 use Illuminate\Support\Facades\Storage;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
@@ -84,7 +84,7 @@ class extends Component {
     #[Computed]
     public function headers(): array
     {
-        return Cache::tags(['pcc_ui'])->remember('pcc_table_headers', 3600, function() {
+        return CacheHelper::rememberTagged(['pcc_ui'], 'pcc_table_headers', 3600, function() {
             return [
                 ['key' => 'kd_lot_no',      'label' => __('KD Lot No'),    'sortable' => true],
                 ['key' => 'part_no',        'label' => __('Part No'),      'sortable' => true],
@@ -162,9 +162,12 @@ class extends Component {
     {
         try {
             // Cache detail data untuk 10 menit dengan tags
-            $this->selectedData = Cache::tags(['pcc_details', "pcc_{$id}"])->remember("pcc_detail_{$id}", 600, function() use ($id) {
-                return Pcc::with(['schedule', 'finishGood'])->find($id);
-            });
+            $this->selectedData = CacheHelper::rememberTagged(
+                ['pcc_details', "pcc_{$id}"],
+                "pcc_detail_{$id}",
+                600,
+                fn () => Pcc::with(['schedule', 'finishGood'])->find($id)
+            );
 
             if (!$this->selectedData) {
                 $this->error(__('Data not found.'), null, 'toast-top toast-end');
@@ -208,7 +211,7 @@ class extends Component {
         $data->delete();
         
         // Invalidate specific item cache and query caches using tags
-        Cache::tags(["pcc_{$id}"])->flush();
+        CacheHelper::flushTagged(["pcc_{$id}"]);
         $this->clearQueryCache();
         
         $this->success(__('Data deleted successfully.'), null, 'toast-top toast-end');
@@ -239,7 +242,7 @@ class extends Component {
     private function clearQueryCache(): void
     {
         // Clear only PCC-related query caches using tags
-        Cache::tags(['pcc_queries'])->flush();
+        CacheHelper::flushTagged(['pcc_queries']);
     }
 
     /* ----------
@@ -346,7 +349,7 @@ class extends Component {
             
             // Invalidate all PCC-related caches after import
             $this->clearQueryCache();
-            Cache::tags(['pcc_details'])->flush(); // Clear all detail caches
+            CacheHelper::flushTagged(['pcc_details']); // Clear all detail caches
             
             $this->closeImportModal();
             $this->resetPage();
@@ -569,12 +572,12 @@ class extends Component {
 
             {{-- Format Tampilan Kolom Tanggal Efektif --}}
             @scope('cell_effective_date', $data)
-                {{ $data->effective_date ? \Carbon\Carbon::parse($data->effective_date)->format('d/m/Y') : '-' }}
+                <x-format.date :value="$data->effective_date" />
             @endscope
 
             {{-- Format Tampilan Kolom Waktu Efektif --}}
             @scope('cell_effective_time', $data)
-                {{ $data->effective_time ? substr($data->effective_time, 0, 5) : '-' }}
+                <x-format.time :value="$data->effective_time" />
             @endscope
 
             {{-- Kolom Aksi (View, Delete) --}}
@@ -597,27 +600,15 @@ class extends Component {
                 <p>{{ __('Make sure your Excel file uses the correct template. Required columns must be filled.') }}</p>
             </x-alert>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {{-- Kolom Download Template --}}
-                <div class="flex flex-col space-y-3 p-4 border rounded-lg">
-                    <div class="flex items-center space-x-2">
-                        <span class="badge badge-primary badge-lg">1</span>
-                        <h3 class="font-semibold text-lg">{{ __('Download Template') }}</h3>
-                    </div>
-                    <p class="text-sm text-base-content/70">{{ __('Download official Excel template to ensure your data format is correct.') }}</p>
+                <x-import.step :number="1" :title="__('Download Template')" :description="__('Download official Excel template to ensure your data format is correct.')">
                     <x-button :label="__('Download Template')" icon="o-arrow-down-tray" wire:click="downloadTemplate" spinner="downloadTemplate" class="btn-info" />
-                </div>
-                {{-- Kolom Upload Data --}}
-                <div class="flex flex-col space-y-3 p-4 border rounded-lg">
-                    <div class="flex items-center space-x-2">
-                        <span class="badge badge-primary badge-lg">2</span>
-                        <h3 class="font-semibold text-lg">{{ __('Upload Your Data') }}</h3>
-                    </div>
-                    <p class="text-sm text-base-content/70">{{ __('Upload Excel file (.xlsx, .xls) that has been filled in here.') }}</p>
+                </x-import.step>
+                <x-import.step :number="2" :title="__('Upload Your Data')" :description="__('Upload Excel file (.xlsx, .xls) that has been filled in here.')">
                     <x-file wire:model="importFile" accept=".xlsx,.xls" :hint="__('Maximum 5MB, format .xlsx or .xls')" />
                     @error('importFile')
                         <x-alert :title="__('Validation Error')" description="{{ $message }}" icon="o-exclamation-triangle" class="alert-error mt-3" />
                     @enderror
-                </div>
+                </x-import.step>
             </div>
         </div>
         <x-slot:actions>
@@ -632,7 +623,7 @@ class extends Component {
             <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                 {{-- Bagian Utama --}}
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label class="text-xs text-base-content/70">{{ __('KD Lot No') }}</label><p class="font-semibold">{{ $selectedData->kd_lot_no }}</p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('KD Lot No') }}</label><p class="font-semibold">{{ $selectedData->kd_lot_no ?? '-' }}</p></div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Part No') }}</label>
                         @if($selectedData->finishGood)
@@ -651,11 +642,11 @@ class extends Component {
                             <p class="text-xs text-red-500 mt-1">{{ __('No FinishGood data') }}</p>
                         @endif
                     </div>
-                    <div><label class="text-xs text-base-content/70">{{ __('Part Name') }}</label><p class="font-semibold">{{ $selectedData->part_name }}</p></div>
-                    <div><label class="text-xs text-base-content/70">{{ __('Slip Barcode') }}</label><p class="font-semibold">{{ $selectedData->slip_barcode }}</p></div>
-                    <div><label class="text-xs text-base-content/70">{{ __('Ship Quantity') }}</label><p class="font-semibold">{{ $selectedData->ship }}</p></div>
-                    <div><label class="text-xs text-base-content/70">{{ __('Date') }}</label><p class="font-semibold">{{ $selectedData->date?->format('d/m/Y') ?? '-' }}</p></div>
-                    <div><label class="text-xs text-base-content/70">{{ __('Time') }}</label><p class="font-semibold">{{ $selectedData->effective_time ? substr($selectedData->effective_time, 0, 5) : '-' }}</p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Part Name') }}</label><p class="font-semibold">{{ $selectedData->part_name ?? '-' }}</p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Slip Barcode') }}</label><p class="font-semibold">{{ $selectedData->slip_barcode ?? '-' }}</p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Ship Quantity') }}</label><p class="font-semibold">{{ $selectedData->ship ?? '-' }}</p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Date') }}</label><p class="font-semibold"><x-format.date :value="$selectedData->date" /></p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Time') }}</label><p class="font-semibold"><x-format.time :value="$selectedData->effective_time" /></p></div>
                 </div>
 
                 <x-hr />
@@ -680,10 +671,10 @@ class extends Component {
                     <x-hr />
                     <h4 class="font-semibold text-sm">{{ __('Schedule Information') }}</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><label class="text-xs text-base-content/70">{{ __('Schedule Date') }}</label><p class="font-semibold">{{ $selectedData->schedule->schedule_date?->format('d/m/Y') ?? '-' }}</p></div>
-                        <div><label class="text-xs text-base-content/70">{{ __('Schedule Time') }}</label><p class="font-semibold">{{ $selectedData->schedule->schedule_time ? substr($selectedData->schedule->schedule_time, 0, 5) : '-' }}</p></div>
-                        <div><label class="text-xs text-base-content/70">{{ __('Adjusted Date') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjusted_date?->format('d/m/Y') ?? '-' }}</p></div>
-                        <div><label class="text-xs text-base-content/70">{{ __('Adjusted Time') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjusted_time ? substr($selectedData->schedule->adjusted_time, 0, 5) : '-' }}</p></div>
+                        <div><label class="text-xs text-base-content/70">{{ __('Schedule Date') }}</label><p class="font-semibold"><x-format.date :value="$selectedData->schedule->schedule_date" /></p></div>
+                        <div><label class="text-xs text-base-content/70">{{ __('Schedule Time') }}</label><p class="font-semibold"><x-format.time :value="$selectedData->schedule->schedule_time" /></p></div>
+                        <div><label class="text-xs text-base-content/70">{{ __('Adjusted Date') }}</label><p class="font-semibold"><x-format.date :value="$selectedData->schedule->adjusted_date" /></p></div>
+                        <div><label class="text-xs text-base-content/70">{{ __('Adjusted Time') }}</label><p class="font-semibold"><x-format.time :value="$selectedData->schedule->adjusted_time" /></p></div>
                         <div><label class="text-xs text-base-content/70">{{ __('Delivery Quantity') }}</label><p class="font-semibold">{{ $selectedData->schedule->delivery_quantity ?? '-' }}</p></div>
                         <div><label class="text-xs text-base-content/70">{{ __('Adjustment Quantity') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjustment_quantity ?? '-' }}</p></div>
                     </div>
@@ -693,8 +684,8 @@ class extends Component {
 
                 {{-- Info Timestamps --}}
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label class="text-xs text-base-content/70">{{ __('Created At') }}</label><p class="font-semibold">{{ $selectedData->created_at?->format('d/m/Y H:i:s') ?? '-' }}</p></div>
-                    <div><label class="text-xs text-base-content/70">{{ __('Updated At') }}</label><p class="font-semibold">{{ $selectedData->updated_at?->format('d/m/Y H:i:s') ?? '-' }}</p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Created At') }}</label><p class="font-semibold"><x-format.datetime :value="$selectedData->created_at" /></p></div>
+                    <div><label class="text-xs text-base-content/70">{{ __('Updated At') }}</label><p class="font-semibold"><x-format.datetime :value="$selectedData->updated_at" /></p></div>
                 </div>
             </div>
         @else
@@ -744,7 +735,7 @@ class extends Component {
                 fail(({ status, response }) => {
                     if (status === 419) {
                         // CSRF token mismatch - reload page
-                        alert('Session Anda telah berakhir. Halaman akan dimuat ulang.');
+                        alert('{{ __('Your session has expired. The page will reload.') }}');
                         window.location.reload();
                     }
                 });

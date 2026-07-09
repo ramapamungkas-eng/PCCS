@@ -208,7 +208,7 @@ new class extends Component {
     </div>
 
     {{-- Warehouse Address Confirmation Modal --}}
-    <x-modal wire:model="showModal" :title="__('Konfirmasi Lokasi Penyimpanan')" persistent>
+    <x-modal wire:model="showModal" :title="__('Storage Location Confirmation')" persistent>
         @if($pendingPcc)
             <div class="space-y-4">
                 {{-- Part Information --}}
@@ -228,7 +228,7 @@ new class extends Component {
                 {{-- Warehouse Address (Main Focus) --}}
                 <div class="bg-warning/10 border-2 border-warning p-6 rounded-lg">
                     <div class="text-center">
-                        <div class="text-sm text-gray-600 mb-2">{{ __('Simpan di lokasi') }}:</div>
+                        <div class="text-sm text-gray-600 mb-2">{{ __('Store in location') }}:</div>
                         <div class="text-3xl font-bold text-warning">{{ $pendingPcc['wh_address'] }}</div>
                     </div>
                 </div>
@@ -236,14 +236,14 @@ new class extends Component {
                 {{-- Warning Message --}}
                 <div class="alert alert-warning">
                     <x-icon name="o-exclamation-triangle" class="w-6 h-6" />
-                    <span>{{ __('Pastikan part disimpan di lokasi yang benar sebelum konfirmasi!') }}</span>
+                    <span>{{ __('Make sure the part is stored in the correct location before confirming!') }}</span>
                 </div>
             </div>
         @endif
 
         <x-slot:actions>
             <x-button :label="__('Cancel')" @click="$wire.closeModal()" />
-            <x-button :label="__('Konfirmasi')" class="btn-primary" wire:click="confirmSubmit" />
+            <x-button :label="__('Confirm')" class="btn-primary" wire:click="confirmSubmit" />
         </x-slot:actions>
     </x-modal>
     

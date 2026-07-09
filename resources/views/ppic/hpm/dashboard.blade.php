@@ -3,23 +3,31 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use App\Models\Customer\HPM\Pcc;
-use App\Models\Customer\HPM\Schedule;
+use Carbon\CarbonImmutable;
+use App\Services\Ppic\DashboardService;
+use App\Support\CacheHelper;
 
 new
 #[Title('PPIC Dashboard')]
 class extends Component {
+    private DashboardService $dashboard;
+
     public string $selectedDate;
+
     // Modal state for simple delay details
     public bool $delayDialogOpen = false;
     public string $delayPartNo = '';
     public string $delayEffectiveDate = '';
-        public int $delayCount = 0;
-        public int $delayDays = 0;
-        public array $delayDateRows = [];
+    public int $delayCount = 0;
+    public int $delayDays = 0;
+    public array $delayDateRows = [];
+
+    public function boot(DashboardService $dashboard): void
+    {
+        $this->dashboard = $dashboard;
+    }
 
     public function mount(): void
     {
@@ -30,45 +38,24 @@ class extends Component {
     {
         $this->delayPartNo = $partNo;
 
-        // Find earliest effective_date among late (no delivery) items up to selected date
-        $date = $this->selectedDate;
-        $pccs = Pcc::with([
-            'schedule:id,slip_number,schedule_date,adjusted_date',
-            'events' => fn($q) => $q->where('hpm_pcc_events.event_type', 'DELIVERY')
-                                    ->select(['hpm_pcc_events.id','hpm_pcc_events.pcc_trace_id','hpm_pcc_events.event_type','hpm_pcc_events.event_timestamp'])
-        ])->where('part_no', $partNo)
-          ->get(['id','part_no','part_name','slip_no','date','time']);
+        $rows = $this->dashboard->getDelayRows($partNo, $this->selectedDate);
+        $this->delayDateRows = $rows;
+        $this->delayCount = count($rows);
 
-        $lateDates = $pccs->filter(function ($pcc) use ($date) {
-            $effectiveDate = $pcc->effective_date instanceof \Carbon\CarbonInterface
-                ? $pcc->effective_date->toDateString()
-                : (string) $pcc->effective_date;
+        if (empty($rows)) {
+            $this->delayEffectiveDate = $this->selectedDate;
+            $this->delayDays = 0;
+            $this->delayDialogOpen = true;
 
-            $isPastOrToday = $effectiveDate <= $date;
-            $hasNoDelivery = !$pcc->events || $pcc->events->isEmpty();
-            return $isPastOrToday && $hasNoDelivery;
-        })->map(function ($pcc) {
-            return $pcc->effective_date instanceof \Carbon\CarbonInterface
-                ? $pcc->effective_date->toDateString()
-                : (string) $pcc->effective_date;
-        });
+            return;
+        }
 
-            $this->delayEffectiveDate = $lateDates->min() ?: $date;
-            $this->delayCount = $lateDates->count();
-            // compute days late (difference between earliest effective date and selected date, min 0)
-            $asOf = \Carbon\CarbonImmutable::parse($this->selectedDate);
-            $eff  = \Carbon\CarbonImmutable::parse($this->delayEffectiveDate);
-            $this->delayDays = $eff->greaterThan($asOf) ? 0 : $eff->diffInDays($asOf);
-            // build per-item rows for modal table (one row per delayed item date, asc)
-            $sortedDates = $lateDates->sort()->values();
-            $this->delayDateRows = $sortedDates->map(function (string $d) use ($asOf) {
-                $ed = \Carbon\CarbonImmutable::parse($d);
-                $days = $ed->greaterThan($asOf) ? 0 : $ed->diffInDays($asOf);
-                return (object) [
-                    'date' => $d,
-                    'days' => $days,
-                ];
-            })->all();
+        $this->delayEffectiveDate = collect($rows)->pluck('date')->min() ?: $this->selectedDate;
+
+        $asOf = CarbonImmutable::parse($this->selectedDate);
+        $eff = CarbonImmutable::parse($this->delayEffectiveDate);
+        $this->delayDays = $eff->greaterThan($asOf) ? 0 : $eff->diffInDays($asOf);
+
         $this->delayDialogOpen = true;
     }
 
@@ -76,179 +63,38 @@ class extends Component {
     public function stat(): array
     {
         $key = 'ppic_stat_' . $this->selectedDate;
-        return Cache::tags(['ppic_stats', 'ppic_date_' . $this->selectedDate])->remember($key, 300, function () {
-            $date = $this->selectedDate;
+        $tags = ['ppic_stats', 'ppic_date_' . $this->selectedDate];
 
-            // Get all PCCs with their schedules and delivery events
-            $allPccs = Pcc::with([
-                'schedule:id,slip_number,schedule_date,adjusted_date,schedule_time,adjusted_time',
-                'events' => fn($q) => $q->where('hpm_pcc_events.event_type', 'DELIVERY')
-                                        ->select(['hpm_pcc_events.id','hpm_pcc_events.pcc_trace_id','hpm_pcc_events.event_type','hpm_pcc_events.event_timestamp'])
-            ])->get(['id','slip_no','part_no','part_name','date','time']);
-
-            // Planned = PCCs whose effective_date equals selected date
-            $planned = $allPccs->filter(function ($pcc) use ($date) {
-                $effectiveDate = $pcc->effective_date instanceof \Carbon\CarbonInterface
-                    ? $pcc->effective_date->toDateString()
-                    : (string) $pcc->effective_date;
-                return $effectiveDate === $date;
-            });
-            $plannedCount = $planned->count();
-
-            // Delivered = PCCs that have at least one DELIVERY event (any date)
-            $delivered = $planned->filter(function ($pcc) {
-                return $pcc->events && $pcc->events->isNotEmpty();
-            });
-            $deliveredCount = $delivered->count();
-
-            // Pending = planned but not yet delivered
-            $pending = $plannedCount - $deliveredCount;
-
-            // Late = PCCs with effective_date < selected date AND no DELIVERY event yet
-            $late = $allPccs->filter(function ($pcc) use ($date) {
-                $effectiveDate = $pcc->effective_date instanceof \Carbon\CarbonInterface
-                    ? $pcc->effective_date->toDateString()
-                    : (string) $pcc->effective_date;
-                
-                    $isBeforeDate = $effectiveDate <= $date;
-                $hasNoDelivery = !$pcc->events || $pcc->events->isEmpty();
-                
-                return $isBeforeDate && $hasNoDelivery;
-            })->count();
-
-            // On-time = delivered items where DELIVERY event_timestamp <= effective date+time
-            $onTime = $delivered->filter(function ($pcc) {
-                $deliveryEvent = $pcc->events->first();
-                if (!$deliveryEvent) {
-                    return false;
-                }
-
-                $effectiveDate = $pcc->effective_date instanceof \Carbon\CarbonInterface
-                    ? $pcc->effective_date
-                    : \Carbon\Carbon::parse($pcc->effective_date);
-
-                $effectiveTime = $pcc->effective_time instanceof \Carbon\CarbonInterface
-                    ? $pcc->effective_time->format('H:i:s')
-                    : ((string) $pcc->effective_time ?: '23:59:59');
-
-                // Combine effective date and time
-                $effectiveDateTime = \Carbon\Carbon::parse($effectiveDate->toDateString() . ' ' . $effectiveTime);
-                
-                return $deliveryEvent->event_timestamp <= $effectiveDateTime;
-            })->count();
-
-            $successRate = $plannedCount > 0 ? round(($deliveredCount / $plannedCount) * 100) : 0;
-
-            // Planned quantity: count unique part_no from planned items
-            $plannedQty = $planned->unique('part_no')->count();
-
-            // Delivered quantity: count unique part_no from delivered items
-            $deliveredQty = $delivered->unique('part_no')->count();
-
-            return compact('plannedCount', 'plannedQty', 'deliveredCount', 'deliveredQty', 'pending', 'late', 'onTime', 'successRate');
-        });
+        return CacheHelper::rememberTagged($tags, $key, 300, fn () => $this->dashboard->getStats($this->selectedDate));
     }
 
     #[Computed]
     public function recentSummary(): Collection
     {
         $key = 'ppic_recent_' . $this->selectedDate;
-        return Cache::tags(['ppic_summaries', 'ppic_date_' . $this->selectedDate])->remember($key, 300, function () {
-            $date = $this->selectedDate;
-            
-            // Get PCCs scheduled for selected date with their delivery events
-            $pccs = Pcc::with([
-                'schedule:id,slip_number,schedule_date,adjusted_date,schedule_time,adjusted_time',
-                'events' => fn($q) => $q->where('hpm_pcc_events.event_type', 'DELIVERY')
-                                        ->select(['hpm_pcc_events.id','hpm_pcc_events.pcc_trace_id','hpm_pcc_events.event_type','hpm_pcc_events.event_timestamp'])
-            ])->get(['id','part_no','part_name','slip_no','date','time']);
+        $tags = ['ppic_summaries', 'ppic_date_' . $this->selectedDate];
 
-            // Filter by effective date = selected date
-            $planned = $pccs->filter(function ($pcc) use ($date) {
-                $effectiveDate = $pcc->effective_date instanceof \Carbon\CarbonInterface
-                    ? $pcc->effective_date->toDateString()
-                    : (string) $pcc->effective_date;
-                return $effectiveDate === $date;
-            });
-
-            // Group by part_no (as user requested)
-            return $planned->groupBy('part_no')->map(function ($group) {
-                $first = $group->first();
-                $total = $group->count();
-                
-                // Count delivered items (have DELIVERY event)
-                $delivered = $group->filter(fn($p) => $p->events && $p->events->isNotEmpty())->count();
-                
-                $progress = $delivered . ' / ' . $total;
-                $status = $delivered === $total ? __('Complete') : ($delivered > 0 ? __('Partial') : __('Pending'));
-                $statusColor = $delivered === $total ? 'badge-success' : ($delivered > 0 ? 'badge-warning' : 'badge-ghost');
-                
-                return (object) [
-                    'partNo' => $first->part_no,
-                    'partName' => $first->part_name,
-                    'slipNo' => $first->slip_no,
-                    'totalQty' => $total,
-                    'progress' => $progress,
-                    'status' => $status,
-                    'statusColor' => $statusColor,
-                ];
-            })->sortByDesc('totalQty')->values()->take(10);
-        });
+        return CacheHelper::rememberTagged($tags, $key, 300, fn () => $this->dashboard->getRecentSummary($this->selectedDate));
     }
 
     #[Computed]
     public function topLateParts(): Collection
     {
         $key = 'ppic_top_late_' . $this->selectedDate;
-        return Cache::tags(['ppic_late_parts', 'ppic_date_' . $this->selectedDate])->remember($key, 300, function () {
-            $date = $this->selectedDate;
-            
-            // Get all PCCs with schedules and delivery events
-            $pccs = Pcc::with([
-                'schedule:id,slip_number,schedule_date,adjusted_date',
-                'events' => fn($q) => $q->where('hpm_pcc_events.event_type', 'DELIVERY')
-                                        ->select(['hpm_pcc_events.id','hpm_pcc_events.pcc_trace_id','hpm_pcc_events.event_type','hpm_pcc_events.event_timestamp'])
-            ])->get(['id','part_no','part_name','slip_no','date','time']);
+        $tags = ['ppic_late_parts', 'ppic_date_' . $this->selectedDate];
 
-            // Filter: effective_date <= selected date AND no DELIVERY event
-            $latePccs = $pccs->filter(function ($pcc) use ($date) {
-                $effectiveDate = $pcc->effective_date instanceof \Carbon\CarbonInterface
-                    ? $pcc->effective_date->toDateString()
-                    : (string) $pcc->effective_date;
-                
-                $isPastDue = $effectiveDate <= $date;
-                $hasNoDelivery = !$pcc->events || $pcc->events->isEmpty();
-                
-                return $isPastDue && $hasNoDelivery;
-            });
-
-            // Group by part_no and count
-            return $latePccs->groupBy('part_no')
-                ->map(fn($g) => (object) [
-                    'part_no' => $g->first()->part_no,
-                    'part_name' => $g->first()->part_name,
-                    'late_count' => $g->count(),
-                ])
-                ->sortByDesc('late_count')
-                ->values()
-                ->take(5);
-        });
+        return CacheHelper::rememberTagged($tags, $key, 300, fn () => $this->dashboard->getTopLateParts($this->selectedDate));
     }
 
-    
-
     /**
-     * Clear all PPIC dashboard caches.
-     * Call this method when PCC data changes (create, update, delete, delivery events).
+     * Clear PPIC dashboard caches.
      */
     public function clearDashboardCache(?string $date = null): void
     {
         if ($date) {
-            // Clear specific date caches
-            Cache::tags(['ppic_date_' . $date])->flush();
+            CacheHelper::flushTagged(['ppic_date_' . $date]);
         } else {
-            // Clear all PPIC dashboard caches
-            Cache::tags(['ppic_stats', 'ppic_summaries', 'ppic_late_parts'])->flush();
+            CacheHelper::flushTagged(['ppic_stats', 'ppic_summaries', 'ppic_late_parts']);
         }
     }
 
@@ -272,7 +118,7 @@ class extends Component {
 }; ?>
 
 <div class="space-y-6">
-    <x-header :title="__('HPM Dashboard')" :subtitle="__('Overview of HPM Operations')" separator progress-indicator >
+    <x-header :title="__('HPM Dashboard')" :subtitle="__('Overview of HPM Operations')" separator progress-indicator>
         <x-slot:actions>
             <x-input type="date" wire:model.live="selectedDate" class="min-w-48" />
             <x-button icon="o-arrow-path" class="btn-ghost" wire:click="refreshData" spinner="refreshData">{{ __('Refresh') }}</x-button>
@@ -345,7 +191,7 @@ class extends Component {
 
         <x-card class="border border-base-300">
             <div class="text-lg font-bold mb-2">{{ __('Daily Stats') }}</div>
-            <div class="text-sm opacity-70 mb-3">{{ \Carbon\CarbonImmutable::parse($selectedDate)->format('d M Y') }}</div>
+            <div class="text-sm opacity-70 mb-3"><x-format.date :value="$selectedDate" format="d M Y" /></div>
             <div class="space-y-2">
                 <div class="flex items-center justify-between p-3 rounded-xl border bg-success/10 border-success/30">
                     <div class="flex items-center gap-3">
@@ -382,11 +228,11 @@ class extends Component {
                 @scope('cell_part', $row)
                     <div class="cursor-pointer" wire:click="openDelayModal('{{ $row->partNo }}')">
                         <div class="font-bold text-primary hover:underline">{{ $row->partNo }}</div>
-                        <div class="text-xs opacity-70">{{ Str::limit($row->partName, 40) }}</div>
+                        <div class="text-xs opacity-70">{{ Str::limit($row->partName ?? '', 40) }}</div>
                     </div>
                 @endscope
                 @scope('cell_slip', $row)
-                    <div class="text-center text-sm font-mono">{{ $row->slipNo }}</div>
+                    <div class="text-center text-sm font-mono">{{ $row->slipNo ?? '-' }}</div>
                 @endscope
                 @scope('cell_qty', $row)
                     <div class="text-center font-bold">{{ $row->totalQty }}</div>
@@ -409,12 +255,12 @@ class extends Component {
                         <div class="w-8 h-8 bg-error text-error-content rounded-full grid place-items-center font-bold">{{ $index + 1 }}</div>
                         <div class="flex-1 cursor-pointer" wire:click="openDelayModal('{{ $part->part_no }}')">
                             <div class="font-bold text-primary hover:underline">{{ $part->part_no }}</div>
-                            <div class="text-xs opacity-70">{{ Str::limit($part->part_name, 35) }}</div>
+                            <div class="text-xs opacity-70">{{ Str::limit($part->part_name ?? '', 35) }}</div>
                         </div>
                         <div class="px-3 py-1 rounded-lg bg-error text-error-content font-bold">{{ $part->late_count }}x</div>
                     </div>
                 @empty
-                    <div class="text-center py-10 opacity-70">{{ __('No delays 🎉') }}</div>
+                    <div class="text-center py-10 opacity-70">{{ __('No delays') }}</div>
                 @endforelse
             </div>
         </x-card>
@@ -431,28 +277,28 @@ class extends Component {
                 <div class="divider my-3"></div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
                     <div class="text-sm opacity-70">{{ __('Effective Date') }}</div>
-                    <div class="sm:col-span-2 font-bold">{{ \Carbon\CarbonImmutable::parse($delayEffectiveDate)->format('d M Y') }}</div>
+                    <div class="sm:col-span-2 font-bold"><x-format.date :value="$delayEffectiveDate" format="d M Y" /></div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center mt-3">
                     <div class="text-sm opacity-70">{{ __('Delay Date') }}</div>
-                    <div class="sm:col-span-2 font-bold">{{ \Carbon\CarbonImmutable::parse($selectedDate)->format('d M Y') }}</div>
+                    <div class="sm:col-span-2 font-bold"><x-format.date :value="$selectedDate" format="d M Y" /></div>
                 </div>
-                    <div class="divider my-3"></div>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
-                        <div class="text-sm opacity-70">{{ __('Delayed Items') }}</div>
-                        <div class="sm:col-span-2"><span class="badge badge-error font-bold">{{ number_format($delayCount) }}</span></div>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center mt-3">
-                        <div class="text-sm opacity-70">{{ __('Days Late') }}</div>
-                        <div class="sm:col-span-2"><span class="badge badge-ghost font-bold">{{ number_format($delayDays) }} {{ $delayDays === 1 ? __('day') : __('days') }}</span></div>
-                    </div>
+                <div class="divider my-3"></div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                    <div class="text-sm opacity-70">{{ __('Delayed Items') }}</div>
+                    <div class="sm:col-span-2"><span class="badge badge-error font-bold">{{ number_format($delayCount) }}</span></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center mt-3">
+                    <div class="text-sm opacity-70">{{ __('Days Late') }}</div>
+                    <div class="sm:col-span-2"><span class="badge badge-ghost font-bold">{{ number_format($delayDays) }} {{ $delayDays === 1 ? __('day') : __('days') }}</span></div>
+                </div>
             </x-card>
 
             <x-card :title="__('Delay Breakdown')" :subtitle="__('Per effective date up to selected date')" class="border border-base-300">
                 @php
                     $dateGroups = collect($delayDateRows)
                         ->groupBy('date')
-                        ->map(function($rows, $date) {
+                        ->map(function ($rows, $date) {
                             return [
                                 'date' => $date,
                                 'count' => count($rows),
@@ -468,7 +314,7 @@ class extends Component {
                     ['key' => 'days', 'label' => __('Delayed Days'), 'class' => 'w-36 text-center'],
                 ]" :rows="$dateGroups">
                     @scope('cell_date', $row)
-                        <div class="font-mono">{{ \Carbon\CarbonImmutable::parse($row['date'])->format('Y-m-d') }}</div>
+                        <div class="font-mono"><x-format.date :value="$row['date']" format="Y-m-d" /></div>
                     @endscope
                     @scope('cell_count', $row)
                         <div class="text-center">

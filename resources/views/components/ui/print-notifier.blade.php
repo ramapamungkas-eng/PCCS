@@ -20,7 +20,9 @@ new class extends Component {
      */
     public function mount()
     {
-        $this->checkStatus(false); // Jangan tandai sudah dibaca saat mount
+        if (auth()->check()) {
+            $this->checkStatus(false); // Jangan tandai sudah dibaca saat mount
+        }
     }
 
     /**
@@ -29,6 +31,10 @@ new class extends Component {
     #[On('print-job-started')]
     public function startProcessing()
     {
+        if (! auth()->check()) {
+            return;
+        }
+
         // PERBAIKAN: Hanya hapus notifikasi 'PrintJobComplete' yang lama
         auth()->user()
             ->unreadNotifications()
@@ -48,7 +54,13 @@ new class extends Component {
      */
     public function checkStatus($markAsRead = true)
     {
-        $notification = auth()->user()
+        $user = auth()->user();
+
+        if (! $user) {
+            return;
+        }
+
+        $notification = $user
             ->unreadNotifications()
             ->where('type', PrintJobComplete::class)
             ->latest()
