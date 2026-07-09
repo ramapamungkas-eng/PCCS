@@ -141,4 +141,19 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | PDF / BrowserShot Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Absolute paths to the Node and Chrome binaries used by Browsershot /
+    | Puppeteer when generating PDFs (e.g. label printing). Leaving these
+    | empty will let the application search common system paths.
+    |
+    */
+
+    'browsershot_chrome_path' => env('BROWSERSHOT_CHROME_PATH', ''),
+    'browsershot_node_binary' => env('BROWSERSHOT_NODE_BINARY', ''),
+    'browsershot_npm_binary' => env('BROWSERSHOT_NPM_BINARY', ''),
+
 ];

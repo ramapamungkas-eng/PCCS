@@ -13,20 +13,24 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\Browsershot\Browsershot;
+use Spatie\LaravelPdf\Facades\Pdf;
 use Throwable;
 
-class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
+class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 600;
+
     public int $tries = 3;
+
     public int $backoff = 30;
+
     public int $uniqueFor = 600;
 
     private const BARCODE_MAX_LENGTH = 250;
+
     private const STORAGE_DIRECTORY = 'print/labels/pccs';
 
     public function __construct(
@@ -39,7 +43,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
      */
     public function uniqueId(): string
     {
-        return 'print-pcc-' . $this->user->id;
+        return 'print-pcc-'.$this->user->id;
     }
 
     public function handle(): void
@@ -51,6 +55,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
 
             if (empty($validIds)) {
                 $this->notifyAndAbort('Tidak ada data yang valid untuk dicetak.');
+
                 return;
             }
 
@@ -58,6 +63,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
 
             if ($dataToPrint->isEmpty()) {
                 $this->notifyAndAbort('Tidak ada data yang ditemukan sesuai kriteria.');
+
                 return;
             }
 
@@ -65,6 +71,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
 
             if (empty($labels)) {
                 $this->notifyAndAbort('Tidak ada label valid yang bisa diproses.');
+
                 return;
             }
 
@@ -84,7 +91,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
     {
         return array_values(array_filter(
             $this->selectedIds,
-            fn($item) => is_string($item) && !empty(trim($item))
+            fn ($item) => is_string($item) && ! empty(trim($item))
         ));
     }
 
@@ -96,7 +103,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
                 'id', 'from', 'to', 'part_no', 'part_name', 'color_code',
                 'supply_address', 'next_supply_address', 'ps_code', 'order_class',
                 'prod_seq_no', 'kd_lot_no', 'ms_id', 'inventory_category',
-                'ship', 'hns', 'slip_barcode', 'slip_no', 'date', 'time'
+                'ship', 'hns', 'slip_barcode', 'slip_no', 'date', 'time',
             ])
             ->get();
     }
@@ -112,6 +119,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
 
                 if (empty($barcodeData)) {
                     $skippedCount++;
+
                     continue;
                 }
 
@@ -136,42 +144,52 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
     private function buildLabelData($item, string $barcodeData): array
     {
         return [
-            'from'              => $item->from ?? '',
-            'to'                => $item->to ?? '',
-            'partNo'            => $item->part_no ?? '',
-            'partDesc'          => $item->part_name ?? '',
-            'colorCode'         => $item->color_code ?? '',
-            'supplyAddress'     => $item->supply_address ?? '',
+            'from' => $item->from ?? '',
+            'to' => $item->to ?? '',
+            'partNo' => $item->part_no ?? '',
+            'partDesc' => $item->part_name ?? '',
+            'colorCode' => $item->color_code ?? '',
+            'supplyAddress' => $item->supply_address ?? '',
             'nextSupplyAddress' => $item->next_supply_address ?? '',
-            'psCode'            => $item->ps_code ?? '',
-            'orderClass'        => $item->order_class ?? '',
-            'prodSeqNo'         => $item->prod_seq_no ?? '',
-            'kdLotNo'           => $item->kd_lot_no ?? '',
-            'msId'              => $item->ms_id ?? '',
+            'psCode' => $item->ps_code ?? '',
+            'orderClass' => $item->order_class ?? '',
+            'prodSeqNo' => $item->prod_seq_no ?? '',
+            'kdLotNo' => $item->kd_lot_no ?? '',
+            'msId' => $item->ms_id ?? '',
             'inventoryCategory' => $item->inventory_category ?? '',
-            'ship'              => $item->ship ?? 0,
-            'hns'               => $item->hns ?? '',
-            'formatted_date'    => $item->effective_date ?? '',
-            'formatted_time'    => $item->effective_time ?? '',
-            'mainBarcodeData'   => $barcodeData,
+            'ship' => $item->ship ?? 0,
+            'hns' => $item->hns ?? '',
+            'formatted_date' => $item->effective_date ?? '',
+            'formatted_time' => $item->effective_time ?? '',
+            'mainBarcodeData' => $barcodeData,
         ];
     }
 
     private function generatePdf(array $labels): string
     {
-        $filename    = "labels-{$this->user->id}-" . now()->timestamp . '.pdf';
-        $storagePath = self::STORAGE_DIRECTORY . "/{$filename}";
+        $filename = "labels-{$this->user->id}-".now()->timestamp.'.pdf';
+        $storagePath = self::STORAGE_DIRECTORY."/{$filename}";
 
         Storage::disk('public')->makeDirectory(self::STORAGE_DIRECTORY);
 
-        $fullPath   = Storage::disk('public')->path($storagePath);
+        $fullPath = Storage::disk('public')->path($storagePath);
         $chromePath = $this->getChromePath();
+        $nodeBinary = config('app.browsershot_node_binary');
+        $npmBinary = config('app.browsershot_npm_binary');
 
         Pdf::view('components.ui.labels.pcc', ['labels' => $labels])
-            ->withBrowsershot(function (Browsershot $browsershot) use ($chromePath) {
+            ->withBrowsershot(function (Browsershot $browsershot) use ($chromePath, $nodeBinary, $npmBinary) {
 
                 if ($chromePath) {
                     $browsershot->setChromePath($chromePath);
+                }
+
+                if ($nodeBinary) {
+                    $browsershot->setNodeBinary($nodeBinary);
+                }
+
+                if ($npmBinary) {
+                    $browsershot->setNpmBinary($npmBinary);
                 }
 
                 $browsershot
@@ -224,7 +242,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
 
     private function verifyPdfFile(string $storagePath): void
     {
-        if (!Storage::disk('public')->exists($storagePath)) {
+        if (! Storage::disk('public')->exists($storagePath)) {
             throw new \Exception('PDF creation failed: File not found.');
         }
 
@@ -249,7 +267,7 @@ class PrintLabelsPCC implements ShouldQueue, ShouldBeUnique
             || str_contains($msg, 'Could not start Chrome');
 
         Log::error('PrintLabelsPCC Failed', [
-            'user'  => $this->user->id,
+            'user' => $this->user->id,
             'error' => $msg,
             'trace' => $e->getTraceAsString(),
         ]);
