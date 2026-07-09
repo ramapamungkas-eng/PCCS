@@ -340,7 +340,7 @@ class extends Component {
             @scope('cell_finish_good_id', $data)
                 <div>
                     @if($data->finishGood)
-                        <p class="font-semibold">{{ $data->finishGood->part_number }}</p>
+                        <p class="font-semibold">{{ $data->finishGood->part_number ?? '-' }}</p>
                         @if($data->finishGood->part_name)
                             <p class="text-xs text-blue-500">{{ $data->finishGood->part_name }}</p>
                         @endif
@@ -435,7 +435,7 @@ class extends Component {
                     @if($selectedData->finishGood)
                         <div>
                             <label class="text-xs text-base-content/70">Part Number</label>
-                            <p class="font-semibold">{{ $selectedData->finishGood->part_number }}</p>
+                            <p class="font-semibold">{{ $selectedData->finishGood->part_number ?? '-' }}</p>
                             @if($selectedData->finishGood->part_name)
                                 <p class="text-xs text-gray-500 mt-1">{{ $selectedData->finishGood->part_name }}</p>
                             @endif

@@ -131,7 +131,7 @@ new class extends Component {
                 \Log::info('Stock added on RECEIVED', [
                     'pcc_id' => $pcc->id,
                     'slip_no' => $pcc->slip_no,
-                    'part_number' => $pcc->finishGood->part_number,
+                    'part_number' => $pcc->finishGood->part_number ?? null,
                     'quantity_added' => $pcc->ship,
                     'new_stock' => $pcc->finishGood->fresh()->stock,
                     'user_id' => Auth::id(),

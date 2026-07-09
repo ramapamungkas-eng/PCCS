@@ -635,8 +635,8 @@ class extends Component {
                     <div><label class="text-xs text-base-content/70">{{ __('KD Lot No') }}</label><p class="font-semibold">{{ $selectedData->kd_lot_no }}</p></div>
                     <div>
                         <label class="text-xs text-base-content/70">{{ __('Part No') }}</label>
-                        <p class="font-semibold">{{ $selectedData->finishGood->part_number }}</p>
                         @if($selectedData->finishGood)
+                            <p class="font-semibold">{{ $selectedData->finishGood->part_number }}</p>
                             @if($selectedData->finishGood->part_name)
                                 <p class="text-xs text-gray-500 mt-1">{{ $selectedData->finishGood->part_name }}</p>
                             @endif
@@ -646,6 +646,9 @@ class extends Component {
                                     @if($selectedData->finishGood->variant) / {{ $selectedData->finishGood->variant }} @endif
                                 </p>
                             @endif
+                        @else
+                            <p class="font-semibold">{{ $selectedData->part_no ?? '-' }}</p>
+                            <p class="text-xs text-red-500 mt-1">{{ __('No FinishGood data') }}</p>
                         @endif
                     </div>
                     <div><label class="text-xs text-base-content/70">{{ __('Part Name') }}</label><p class="font-semibold">{{ $selectedData->part_name }}</p></div>
@@ -678,9 +681,9 @@ class extends Component {
                     <h4 class="font-semibold text-sm">{{ __('Schedule Information') }}</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div><label class="text-xs text-base-content/70">{{ __('Schedule Date') }}</label><p class="font-semibold">{{ $selectedData->schedule->schedule_date?->format('d/m/Y') ?? '-' }}</p></div>
-                        <div><label class="text-xs text-base-content/70">{{ __('Schedule Time') }}</label><p class="font-semibold">{{ $selectedData->schedule->schedule_time?->format('H:i') ?? '-' }}</p></div>
+                        <div><label class="text-xs text-base-content/70">{{ __('Schedule Time') }}</label><p class="font-semibold">{{ $selectedData->schedule->schedule_time ? substr($selectedData->schedule->schedule_time, 0, 5) : '-' }}</p></div>
                         <div><label class="text-xs text-base-content/70">{{ __('Adjusted Date') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjusted_date?->format('d/m/Y') ?? '-' }}</p></div>
-                        <div><label class="text-xs text-base-content/70">{{ __('Adjusted Time') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjusted_time?->format('H:i') ?? '-' }}</p></div>
+                        <div><label class="text-xs text-base-content/70">{{ __('Adjusted Time') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjusted_time ? substr($selectedData->schedule->adjusted_time, 0, 5) : '-' }}</p></div>
                         <div><label class="text-xs text-base-content/70">{{ __('Delivery Quantity') }}</label><p class="font-semibold">{{ $selectedData->schedule->delivery_quantity ?? '-' }}</p></div>
                         <div><label class="text-xs text-base-content/70">{{ __('Adjustment Quantity') }}</label><p class="font-semibold">{{ $selectedData->schedule->adjustment_quantity ?? '-' }}</p></div>
                     </div>
