@@ -5,16 +5,16 @@ namespace App\Jobs;
 use App\Models\Customer\HPM\Pcc;
 use App\Models\User;
 use App\Notifications\PrintJobComplete;
+use App\Services\PlaywrightPdfService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Spatie\Browsershot\Browsershot;
-use Spatie\LaravelPdf\Facades\Pdf;
 use Throwable;
 
 class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
@@ -51,6 +51,8 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
         ini_set('memory_limit', '512M');
 
         try {
+            $this->setProgress('processing', 0, 'Memvalidasi data...');
+
             $validIds = $this->validateAndFilterIds();
 
             if (empty($validIds)) {
@@ -58,6 +60,8 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
 
                 return;
             }
+
+            $this->setProgress('processing', 10, 'Mengambil data...');
 
             $dataToPrint = $this->fetchData($validIds);
 
@@ -67,6 +71,8 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
+            $this->setProgress('processing', 30, 'Menyiapkan label...');
+
             [$labels, $skippedCount] = $this->mapLabels($dataToPrint);
 
             if (empty($labels)) {
@@ -75,11 +81,20 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
+            $this->setProgress('processing', 50, 'Membuat PDF...');
+
             $storagePath = $this->generatePdf($labels);
             $this->verifyPdfFile($storagePath);
 
             $downloadUrl = Storage::disk('public')->url($storagePath);
+
+            $this->setProgress('completed', 100, 'File PDF Anda telah siap.', $downloadUrl);
             $this->user->notify(new PrintJobComplete($downloadUrl, 'File PDF Anda telah siap. Klik untuk mengunduh.'));
+
+            Log::info('PrintLabelsPCC Completed', [
+                'user_id' => $this->user->id,
+                'download_url' => $downloadUrl,
+            ]);
 
         } catch (Throwable $e) {
             $this->handleError($e);
@@ -173,71 +188,34 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
         Storage::disk('public')->makeDirectory(self::STORAGE_DIRECTORY);
 
         $fullPath = Storage::disk('public')->path($storagePath);
-        $chromePath = $this->getChromePath();
-        $nodeBinary = config('app.browsershot_node_binary');
-        $npmBinary = config('app.browsershot_npm_binary');
 
-        Pdf::view('components.ui.labels.pcc', ['labels' => $labels])
-            ->withBrowsershot(function (Browsershot $browsershot) use ($chromePath, $nodeBinary, $npmBinary) {
+        $html = view('components.ui.labels.pcc', ['labels' => $labels])->render();
 
-                if ($chromePath) {
-                    $browsershot->setChromePath($chromePath);
-                }
+        $playwright = app(PlaywrightPdfService::class);
 
-                if ($nodeBinary) {
-                    $browsershot->setNodeBinary($nodeBinary);
-                }
+        $temporaryPdfPath = $playwright->generate($html, [
+            'format' => 'A4',
+            'margin' => ['top' => '0', 'right' => '0', 'bottom' => '0', 'left' => '0'],
+            'printBackground' => true,
+            'waitUntil' => 'networkidle',
+            'timeout' => 300,
+            'executablePath' => config('app.playwright_chromium_path'),
+            'args' => [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-breakpad',
+                '--mute-audio',
+                '--font-render-hinting=none',
+            ],
+        ]);
 
-                if ($npmBinary) {
-                    $browsershot->setNpmBinary($npmBinary);
-                }
-
-                $browsershot
-                    ->noSandbox()
-                    ->addChromiumArguments([
-                        'disable-setuid-sandbox',
-                        'disable-web-security',
-                        'disable-dev-shm-usage',
-                        'disable-gpu',
-                        'disable-software-rasterizer',
-                        'disable-breakpad',
-                        'mute-audio',
-                        'font-render-hinting=none',
-                    ])
-                    ->format('A4')
-                    ->margins(0, 0, 0, 0, 'mm')
-                    ->showBackground()
-                    ->waitUntilNetworkIdle(false) // networkidle2 — lebih toleran, kurangi risiko timeout
-                    ->timeout(300);
-            })
-            ->save($fullPath);
+        rename($temporaryPdfPath, $fullPath);
 
         return $storagePath;
-    }
-
-    private function getChromePath(): ?string
-    {
-        // Pakai config() bukan env()
-        $path = config('app.browsershot_chrome_path');
-        if ($path && is_executable($path)) {
-            return $path;
-        }
-
-        $commonPaths = [
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser',
-            '/usr/bin/google-chrome',
-            '/usr/bin/chrome',
-            '/snap/bin/chromium',
-        ];
-
-        foreach ($commonPaths as $p) {
-            if (file_exists($p) && is_executable($p)) {
-                return $p;
-            }
-        }
-
-        return null;
     }
 
     private function verifyPdfFile(string $storagePath): void
@@ -254,6 +232,7 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
     private function notifyAndAbort(string $message): void
     {
         Log::warning("PrintLabelsPCC Aborted: {$message}", ['user_id' => $this->user->id]);
+        $this->setProgress('failed', 100, $message);
         $this->user->notify(new PrintJobComplete(null, $message));
     }
 
@@ -264,6 +243,7 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
         $isChromeError = str_contains($msg, 'Browser')
             || str_contains($msg, 'Chrome')
             || str_contains($msg, 'Puppeteer')
+            || str_contains($msg, 'Playwright')
             || str_contains($msg, 'Could not start Chrome');
 
         Log::error('PrintLabelsPCC Failed', [
@@ -276,6 +256,23 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
             ? 'Terjadi kesalahan pada sistem PDF Generator. Silakan hubungi IT.'
             : 'Gagal membuat PDF. Silakan coba lagi nanti.';
 
+        $this->setProgress('failed', 100, $userMessage);
         $this->user->notify(new PrintJobComplete(null, $userMessage));
+    }
+
+    private function setProgress(string $status, int $progress, string $message, ?string $downloadUrl = null): void
+    {
+        // Gunakan store yang persisten agar progress bisa dibaca antar request.
+        Cache::store(config('app.print_progress_cache_store'))->put(
+            "print-progress:{$this->user->id}",
+            [
+                'status' => $status,
+                'progress' => $progress,
+                'message' => $message,
+                'download_url' => $downloadUrl,
+                'updated_at' => now()->toDateTimeString(),
+            ],
+            now()->addMinutes(10)
+        );
     }
 }

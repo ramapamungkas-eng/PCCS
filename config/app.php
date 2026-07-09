@@ -143,17 +143,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | PDF / BrowserShot Configuration
+    | PDF / Playwright Configuration
     |--------------------------------------------------------------------------
     |
-    | Absolute paths to the Node and Chrome binaries used by Browsershot /
-    | Puppeteer when generating PDFs (e.g. label printing). Leaving these
-    | empty will let the application search common system paths.
+    | Absolute path to a custom Chromium executable used by Playwright when
+    | generating PDFs (e.g. label printing). Leave empty to use the Chromium
+    | binary managed by Playwright via "npx playwright install chromium".
+    |
+    | The print progress cache store should be a persistent store (file, redis,
+    | database) so the UI can read job progress across requests.
     |
     */
 
-    'browsershot_chrome_path' => env('BROWSERSHOT_CHROME_PATH', ''),
-    'browsershot_node_binary' => env('BROWSERSHOT_NODE_BINARY', ''),
-    'browsershot_npm_binary' => env('BROWSERSHOT_NPM_BINARY', ''),
+    'playwright_chromium_path' => env('PLAYWRIGHT_CHROMIUM_PATH', ''),
+    'print_progress_cache_store' => env('PRINT_PROGRESS_CACHE_STORE', 'file'),
 
 ];

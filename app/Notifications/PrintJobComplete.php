@@ -2,18 +2,14 @@
 
 namespace App\Notifications;
 
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
 
 /**
  * Notifikasi yang dikirim setelah job cetak selesai (sukses atau gagal).
- * Mengimplementasikan ShouldQueue agar pengiriman notifikasi tidak memblokir proses.
+ * Disimpan langsung ke database agar status segera terlihat oleh UI polling.
  */
-class PrintJobComplete extends Notification implements ShouldQueue
+class PrintJobComplete extends Notification
 {
-    use Queueable;
-
     /**
      * URL publik untuk mengunduh file PDF yang dihasilkan.
      * Akan bernilai null jika terjadi kegagalan.
@@ -29,8 +25,8 @@ class PrintJobComplete extends Notification implements ShouldQueue
     /**
      * Buat instance notifikasi baru.
      *
-     * @param ?string $downloadUrl URL untuk mengunduh file, atau null jika gagal.
-     * @param string $message Pesan status untuk pengguna.
+     * @param  ?string  $downloadUrl  URL untuk mengunduh file, atau null jika gagal.
+     * @param  string  $message  Pesan status untuk pengguna.
      */
     public function __construct(?string $downloadUrl = null, string $message = 'File PDF Anda telah siap untuk diunduh.')
     {
@@ -40,9 +36,6 @@ class PrintJobComplete extends Notification implements ShouldQueue
 
     /**
      * Tentukan channel pengiriman notifikasi.
-     *
-     * @param  object  $notifiable
-     * @return array
      */
     public function via(object $notifiable): array
     {
@@ -53,9 +46,6 @@ class PrintJobComplete extends Notification implements ShouldQueue
     /**
      * Mendapatkan representasi array dari notifikasi.
      * Data ini yang akan disimpan di kolom 'data' (JSON) pada tabel 'notifications'.
-     *
-     * @param  object  $notifiable
-     * @return array
      */
     public function toArray(object $notifiable): array
     {

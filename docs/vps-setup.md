@@ -7,8 +7,8 @@ Deploy this Laravel 12 + Livewire/Volt + Tailwind CSS application on an Ubuntu s
 - Ubuntu 24.04 LTS
 - Apache2 + PHP 8.4-FPM
 - SQLite (default) or MySQL/PostgreSQL
-- Node.js + npm (required by Browsershot/Puppeteer for PDF/label generation)
-- Chromium or Google Chrome (required by Browsershot/Puppeteer)
+- Node.js + npm (required by Playwright for PDF/label generation)
+- Chromium or Google Chrome (Playwright can download Chromium automatically, but a system Chrome/Chromium works too)
 - Composer
 - Redis (recommended for cache, session, and queues)
 - Cloudflare origin certificate (optional but recommended)
@@ -94,10 +94,12 @@ MAIL_FROM_NAME="${APP_NAME}"
 
 GOOGLE2FA_ENABLED=true
 
-BROWSERSHOT_CHROME_PATH=/usr/bin/chromium
-BROWSERSHOT_NODE_BINARY=/usr/bin/node
-BROWSERSHOT_NPM_BINARY=/usr/bin/npm
-PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Leave empty to use the Chromium binary downloaded by Playwright.
+PLAYWRIGHT_CHROMIUM_PATH=
+
+# Cache store for print progress; must persist across requests.
+# Use 'redis' if you run multiple app servers, otherwise 'file' is fine.
+PRINT_PROGRESS_CACHE_STORE=file
 ```
 
 ## 4. Dependencies and build
@@ -105,6 +107,7 @@ PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ```bash
 composer install --no-dev --optimize-autoloader
 npm install
+npx playwright install chromium
 npm run build
 ```
 
@@ -284,6 +287,6 @@ sudo systemctl reload apache2
 ## Notes
 
 - If you do not have Redis available, set `CACHE_STORE=database`, `SESSION_DRIVER=database`, and `QUEUE_CONNECTION=database`. Note that the app uses cache tags, so Redis is strongly recommended for production.
-- **Node.js and Chromium are required for PDF/label printing.** Make sure `BROWSERSHOT_CHROME_PATH`, `BROWSERSHOT_NODE_BINARY`, and `BROWSERSHOT_NPM_BINARY` point to the correct binaries and are executable by the PHP/queue user.
-- If printing still fails with `node: not found`, the queue worker or PHP-FPM process does not see Node in its `PATH`. Set the absolute paths above or add Node's directory to the systemd service `Environment=PATH=...`.
+- **Node.js and Chromium are required for PDF/label printing.** Playwright downloads its own Chromium binary, but the PHP/queue process must be able to execute Node. Run `npx playwright install chromium` after `npm install`, and run `npx playwright install-deps chromium` with root privileges if browser startup fails.
+- If printing still fails with `node: not found`, the queue worker or PHP-FPM process does not see Node in its `PATH`. Set the absolute path in your systemd service `Environment=PATH=...` or ensure Node is installed and available.
 - Always run `php artisan config:cache`, `route:cache`, and `view:cache` in production after deploying.

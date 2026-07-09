@@ -546,6 +546,7 @@ class extends Component {
                     wire:click="bulkPrint"
                     class="btn-success"
                     spinner="bulkPrint"
+                    wire:loading.attr="disabled"
                     :badge="$selectedCount"
                     badge-classes="badge-warning"
                     responsive />
