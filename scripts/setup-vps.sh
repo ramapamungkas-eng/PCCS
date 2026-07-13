@@ -8,12 +8,11 @@
 #
 # Environment variables (optional):
 #   APP_DIR       - application root (default: /var/www/pccs)
-#   APP_USER      - the user that runs PHP/queue worker (default: www)
+#   APP_USER      - the user that runs PHP/queue worker (auto-detected)
 
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/var/www/pccs}"
-APP_USER="${APP_USER:-www}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,24 +28,53 @@ die() {
     exit 1
 }
 
-echo "========================================"
-echo "  PCCS VPS Playwright Setup"
-echo "========================================"
-echo "  App dir  : $APP_DIR"
-echo "  App user : $APP_USER"
-echo ""
-
 # ── 0. Pre-flight ──────────────────────────
 
 [ "$(id -u)" -eq 0 ] || die "This script must be run as root (use sudo)."
-
-id "$APP_USER" &>/dev/null || die "App user '$APP_USER' does not exist on this system."
 
 [ -d "$APP_DIR" ] || die "App directory '$APP_DIR' not found. Deploy the code first."
 
 command -v node &>/dev/null || die "Node.js is not installed. Install Node.js 18+ first."
 command -v npm  &>/dev/null || die "npm is not installed."
 command -v php  &>/dev/null || log_warn "PHP not found in PATH; skipping PHP extension checks."
+
+# Auto-detect the PHP-FPM pool user if APP_USER not set
+if [ -z "${APP_USER:-}" ]; then
+    # Try pool configs
+    for conf in /etc/php/*/fpm/pool.d/www.conf /etc/php/*/fpm/pool.d/*.conf; do
+        [ -f "$conf" ] || continue
+        detected=$(grep -Po '^user\s*=\s*\K\S+' "$conf" 2>/dev/null | head -1)
+        if [ -n "$detected" ] && id "$detected" &>/dev/null; then
+            APP_USER="$detected"
+            break
+        fi
+    done
+
+    # Fall back to process inspection
+    if [ -z "${APP_USER:-}" ]; then
+        detected=$(ps aux 2>/dev/null | grep -E 'php-fpm:\s+pool' | grep -v grep | awk '{print $1}' | head -1)
+        [ -n "${detected:-}" ] && id "$detected" &>/dev/null && APP_USER="$detected"
+    fi
+
+    # Second fallback: common VPS users
+    for u in www-data www nobody; do
+        if id "$u" &>/dev/null; then
+            APP_USER="$u"
+            break
+        fi
+    done
+
+    [ -n "${APP_USER:-}" ] || die "Could not auto-detect PHP-FPM user. Set APP_USER env var."
+fi
+
+id "$APP_USER" &>/dev/null || die "App user '$APP_USER' does not exist on this system."
+
+echo "========================================"
+echo "  PCCS VPS Playwright Setup"
+echo "========================================"
+echo "  App dir  : $APP_DIR"
+echo "  App user : $APP_USER"
+echo ""
 
 log_info "Node.js $(node -v) | npm $(npm -v)"
 
@@ -61,12 +89,13 @@ log_info "[1/5] Installing npm dependencies..."
 cd "$APP_DIR"
 
 if [ ! -d "node_modules" ]; then
-    log_info "node_modules missing, running npm ci..."
+    log_info "  node_modules missing, running npm ci..."
     sudo -u "$APP_USER" npm ci --omit=dev
 else
-    log_info "node_modules exists, verifying playwright is present..."
-    if ! sudo -u "$APP_USER" node -e "require('playwright')" 2>/dev/null; then
-        log_warn "playwright package missing, reinstalling..."
+    if sudo -u "$APP_USER" node -e "require('playwright')" 2>/dev/null; then
+        log_info "  playwright: OK"
+    else
+        log_warn "  playwright: MISSING — reinstalling..."
         sudo -u "$APP_USER" npm ci --omit=dev
     fi
 fi
@@ -112,7 +141,16 @@ fi
 
 echo ""
 log_info "[4/5] Installing Playwright Chromium browser (as $APP_USER)..."
-sudo -u "$APP_USER" npx playwright install chromium 2>&1
+
+PLAYWRIGHT_CLI="$APP_DIR/node_modules/playwright/cli.js"
+
+if [ ! -f "$PLAYWRIGHT_CLI" ]; then
+    log_warn "playwright CLI not found at $PLAYWRIGHT_CLI"
+    log_warn "Installing playwright npm package first..."
+    sudo -u "$APP_USER" npm install --omit=dev 2>&1
+fi
+
+sudo -u "$APP_USER" node "$PLAYWRIGHT_CLI" install chromium 2>&1
 
 # ── 5. Locate & verify Chromium ────────────
 
@@ -121,30 +159,64 @@ log_info "[5/5] Locating and verifying Chromium binary..."
 
 CHROMIUM_PATH=""
 
-for cache_base in \
-    "/home/$APP_USER/.cache/ms-playwright" \
-    "/var/www/.cache/ms-playwright" \
-    "/root/.cache/ms-playwright"; do
+# Collect all possible cache dirs
+cache_dirs=()
 
-    if [ -d "$cache_base" ]; then
-        found=$(find "$cache_base" -maxdepth 2 -path '*/chrome-linux64/chrome' -type f -executable 2>/dev/null | sort -r | head -1)
-        if [ -n "$found" ]; then
-            CHROMIUM_PATH="$found"
-            break
-        fi
+# The current user's HOME
+app_home=$(sudo -u "$APP_USER" bash -c 'echo "$HOME"' 2>/dev/null || echo "")
+[ -n "$app_home" ] && cache_dirs+=("$app_home/.cache/ms-playwright")
+
+# Common locations
+cache_dirs+=(
+    "/var/www/.cache/ms-playwright"
+    "/home/$APP_USER/.cache/ms-playwright"
+    "/root/.cache/ms-playwright"
+)
+
+# Also scan any $HOME/.cache/ms-playwright for any user on the system
+for homedir in /home/* /var/www /root; do
+    [ -d "$homedir/.cache/ms-playwright" ] && cache_dirs+=("$homedir/.cache/ms-playwright")
+done
+
+# Deduplicate
+declare -A seen
+unique_dirs=()
+for d in "${cache_dirs[@]}"; do
+    [ -d "$d" ] || continue
+    [ -n "${seen[$d]:-}" ] && continue
+    seen[$d]=1
+    unique_dirs+=("$d")
+done
+
+for cache_dir in "${unique_dirs[@]}"; do
+    log_info "  Searching: $cache_dir"
+    # Path is: ms-playwright/chromium-XXXX/chrome-linux64/chrome (depth 3)
+    found=$(find "$cache_dir" -maxdepth 3 -path '*/chrome-linux64/chrome' -type f -executable 2>/dev/null | sort -r | head -1)
+    if [ -n "$found" ]; then
+        CHROMIUM_PATH="$found"
+        break
     fi
 done
 
 if [ -z "$CHROMIUM_PATH" ] || [ ! -f "$CHROMIUM_PATH" ]; then
-    die "Could not find Chromium binary after installation."
+    log_error "Could not find Chromium binary after installation."
+    log_error "Searched these directories:"
+    for d in "${unique_dirs[@]}"; do
+        log_error "  $d"
+    done
+    log_error ""
+    log_error "Try manually:"
+    log_error "  sudo -u $APP_USER node $PLAYWRIGHT_CLI install chromium --force"
+    log_error "  find / -path '*/chrome-linux64/chrome' -type f 2>/dev/null"
+    die "Chromium binary not found."
 fi
 
 log_info "  Binary : $CHROMIUM_PATH"
 
 VERSION=$(sudo -u "$APP_USER" "$CHROMIUM_PATH" --version 2>&1) || {
-    log_error "Chromium --version check failed. Missing system libraries?"
-    log_error "Try: ldd '$CHROMIUM_PATH' | grep 'not found'"
-    die "Chromium cannot be launched. Run 'npx playwright install-deps chromium' manually."
+    log_error "Chromium version check failed."
+    log_error "Missing system libraries? Run: ldd '$CHROMIUM_PATH' | grep 'not found'"
+    die "Chromium cannot be launched."
 }
 
 log_info "  Version: $VERSION"
