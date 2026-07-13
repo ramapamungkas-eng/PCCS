@@ -89,9 +89,24 @@ final class PlaywrightPdfService
             if (str_contains($errorOutput, 'SIGTRAP')
                 || str_contains($errorOutput, 'Target page, context or browser has been closed')
                 || str_contains($errorOutput, 'crashpad')) {
-                $message .= "\n\nChromium crashed on startup. This usually means missing system libraries.\n".
-                    "Fix: run 'npx playwright install-deps chromium' (as root) on your VPS to install them,\n".
-                    'then restart your queue worker.';
+
+                $message .= "\n\nChromium crashed on startup (SIGTRAP).\n\n";
+
+                $appArmorProfiles = $this->detectAppArmorChromeProfiles();
+                if ($appArmorProfiles !== []) {
+                    $message .= "AppArmor is actively confining Chromium:\n".
+                        '  '.implode(', ', $appArmorProfiles)."\n\n".
+                        "Fix on the VPS:\n".
+                        "  sudo apt install -y apparmor-utils\n".
+                        '  sudo aa-disable '.implode(' ', $appArmorProfiles)."\n\n".
+                        "If that doesn't help, also check for missing system libs:\n".
+                        "  npx playwright install-deps chromium (as root)\n\n".
+                        'Then restart your queue worker.';
+                } else {
+                    $message .= "This usually means missing system libraries.\n".
+                        "Fix: run 'npx playwright install-deps chromium' (as root) on your VPS, ".
+                        'then restart your queue worker.';
+                }
             }
 
             throw new RuntimeException($message);
@@ -173,28 +188,74 @@ final class PlaywrightPdfService
         if ($process->isSuccessful()) {
             $version = trim($process->getOutput());
             $diagnostics[] = "Chromium version: {$version}";
+        } else {
+            $stderr = $process->getErrorOutput();
+            $diagnostics[] = "Failed to run --version: {$stderr}";
 
-            return [
-                'ok' => true,
-                'executable' => $executable,
-                'version' => $version,
-                'diagnostics' => $diagnostics,
-            ];
+            if (str_contains($stderr, 'SIGTRAP') || str_contains($stderr, 'error while loading shared libraries')) {
+                $diagnostics[] = 'Missing system libraries — run: npx playwright install-deps chromium (as root)';
+            }
         }
 
-        $stderr = $process->getErrorOutput();
-        $diagnostics[] = "Failed to run --version: {$stderr}";
+        $appArmorProfiles = $this->detectAppArmorChromeProfiles();
+        if ($appArmorProfiles !== []) {
+            $diagnostics[] = count($appArmorProfiles).' AppArmor profile(s) may block Chromium:';
+            foreach ($appArmorProfiles as $profile) {
+                $diagnostics[] = "  - {$profile}";
+            }
 
-        if (str_contains($stderr, 'SIGTRAP') || str_contains($stderr, 'error while loading shared libraries')) {
-            $diagnostics[] = '⚠ Missing system libraries detected — run: npx playwright install-deps chromium (as root)';
+            $diagnostics[] = 'Fix: sudo aa-disable '.implode(' ', $appArmorProfiles).' (install apparmor-utils first)';
         }
 
         return [
-            'ok' => false,
+            'ok' => $process->isSuccessful() && $appArmorProfiles === [],
             'executable' => $executable,
-            'version' => null,
+            'version' => $process->isSuccessful() ? trim($process->getOutput()) : null,
             'diagnostics' => $diagnostics,
         ];
+    }
+
+    /**
+     * @return string[]
+     */
+    private function detectAppArmorChromeProfiles(): array
+    {
+        if (! is_executable('/usr/sbin/aa-status')) {
+            return [];
+        }
+
+        $process = new Process(['/usr/sbin/aa-status', '--json']);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            return [];
+        }
+
+        $data = json_decode($process->getOutput(), true);
+        $profiles = $data['profiles'] ?? [];
+
+        $profiles = match (true) {
+            is_array($profiles)
+                && count($profiles) > 0
+                && array_is_list($profiles) === false => array_keys($profiles),
+            is_array($profiles) => $profiles,
+            default => [],
+        };
+
+        $chromeProfiles = [];
+
+        foreach ($profiles as $profile) {
+            if (str_contains($profile, 'chrome') || str_contains($profile, 'chromium')) {
+                // Only include enforcement-mode profiles
+                $mode = $data['profiles'][$profile] ?? null;
+
+                if ($mode === 'enforce' || $mode === null) {
+                    $chromeProfiles[] = $profile;
+                }
+            }
+        }
+
+        return $chromeProfiles;
     }
 
     private function detectSystemChromium(): ?string

@@ -19,10 +19,22 @@ async function main() {
         process.exit(1);
     }
 
+    // Suppress crashpad handler — prevents SIGTRAP when AppArmor/profile
+    // confines the Chromium binary (common on VPS/container deployments).
+    process.env.BREAKPAD_DUMP_LOCATION = '/dev/null';
+
     const launchOptions = {
         headless: true,
         args: options.args || [],
     };
+
+    // Prepend crashpad-suppressing flags so they appear before any
+    // user-supplied args (last occurrence wins for most Chromium flags).
+    launchOptions.args = [
+        '--disable-crashpad-for-testing',
+        '--disable-features=Crashpad',
+        ...launchOptions.args,
+    ];
 
     if (options.executablePath) {
         launchOptions.executablePath = options.executablePath;
@@ -35,7 +47,6 @@ async function main() {
 
         const fileUrl = 'file://' + absoluteHtmlPath;
 
-        // The PHP side treats timeout as seconds; Playwright expects milliseconds.
         const navigationTimeoutMs = (options.timeout ?? 300) * 1000;
 
         await page.goto(fileUrl, {

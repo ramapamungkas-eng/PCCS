@@ -85,7 +85,7 @@ fi
 # ── 1. Install npm dependencies ────────────
 
 echo ""
-log_info "[1/5] Installing npm dependencies..."
+log_info "[1/6] Installing npm dependencies..."
 cd "$APP_DIR"
 
 if [ ! -d "node_modules" ]; then
@@ -103,7 +103,7 @@ fi
 # ── 2. System deps for Chromium ────────────
 
 echo ""
-log_info "[2/5] Installing Chromium system dependencies..."
+log_info "[2/6] Installing Chromium system dependencies..."
 
 npx playwright install-deps chromium 2>&1 || {
     log_warn "npx install-deps failed. Falling back to manual apt..."
@@ -126,7 +126,7 @@ npx playwright install-deps chromium 2>&1 || {
 # ── 3. PHP extension checks ────────────────
 
 echo ""
-log_info "[3/5] Checking PHP extensions..."
+log_info "[3/6] Checking PHP extensions..."
 if command -v php &>/dev/null; then
     for ext in mbstring gd fileinfo pdo pdo_mysql; do
         if php -m 2>/dev/null | grep -qi "^$ext$"; then
@@ -140,7 +140,7 @@ fi
 # ── 4. Install Playwright Chromium ─────────
 
 echo ""
-log_info "[4/5] Installing Playwright Chromium browser (as $APP_USER)..."
+log_info "[4/6] Installing Playwright Chromium browser (as $APP_USER)..."
 
 PLAYWRIGHT_CLI="$APP_DIR/node_modules/playwright/cli.js"
 
@@ -152,10 +152,36 @@ fi
 
 sudo -u "$APP_USER" node "$PLAYWRIGHT_CLI" install chromium 2>&1
 
-# ── 5. Locate & verify Chromium ────────────
+# ── 5. AppArmor check ──────────────────────
 
 echo ""
-log_info "[5/5] Locating and verifying Chromium binary..."
+log_info "[5/6] Checking AppArmor profiles for Chromium..."
+
+if command -v aa-status &>/dev/null; then
+    if aa-status 2>/dev/null | grep -qiE 'chrome|chromium'; then
+        log_warn "AppArmor has Chrome/Chromium profiles that may block Playwright!"
+
+        if command -v aa-disable &>/dev/null; then
+            for profile in $(aa-status 2>/dev/null | grep -iE '^\s+(chrome|chromium|snap\.chromium)' | tr -d ' '); do
+                log_warn "Disabling AppArmor profile: $profile"
+                aa-disable "$profile" 2>&1 || aa-complain "$profile" 2>&1 || true
+            done
+        else
+            log_warn "apparmor-utils not installed. Install it to auto-fix:"
+            log_warn "  sudo apt install -y apparmor-utils"
+            log_warn "  sudo aa-disable chrome    # (or whichever profile shows up)"
+        fi
+    else
+        log_info "No AppArmor Chrome profiles detected."
+    fi
+else
+    log_info "AppArmor not found on this system."
+fi
+
+# ── 6. Locate & verify Chromium ────────────
+
+echo ""
+log_info "[6/6] Locating and verifying Chromium binary..."
 
 CHROMIUM_PATH=""
 
