@@ -84,15 +84,19 @@ echo ""
 log_info "[1/6] Installing npm dependencies..."
 cd "$APP_DIR"
 
+# Fix permissions — node_modules may have been written by root from prior runs
+[ -d node_modules ] && chown -R "$APP_USER":"$APP_USER" node_modules 2>/dev/null || true
+
 if [ ! -d "node_modules" ]; then
-    log_info "  node_modules missing, running npm ci..."
-    sudo -u "$APP_USER" npm ci --omit=dev
+    log_info "  node_modules missing, running npm install..."
+    sudo -u "$APP_USER" npm install --omit=dev
 else
     if sudo -u "$APP_USER" node -e "require('puppeteer')" 2>/dev/null; then
         log_info "  puppeteer: OK"
     else
         log_warn "  puppeteer: MISSING — reinstalling..."
-        sudo -u "$APP_USER" npm ci --omit=dev
+        sudo -u "$APP_USER" rm -rf node_modules
+        sudo -u "$APP_USER" npm install --omit=dev
     fi
 fi
 
