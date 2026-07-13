@@ -3,7 +3,10 @@
 namespace App\Exports;
 
 use App\Contracts\ExcelExport;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
@@ -13,7 +16,7 @@ class PccReportExport implements ExcelExport
         protected string $fromDate,
         protected ?string $toDate = null,
     ) {
-        if (!$this->toDate) {
+        if (! $this->toDate) {
             $this->toDate = $this->fromDate;
         }
     }
@@ -37,7 +40,7 @@ class PccReportExport implements ExcelExport
 
     public function data(): array
     {
-        $toCarbon = fn ($v) => $v ? \Carbon\Carbon::parse($v) : null;
+        $toCarbon = fn ($v) => $v ? Carbon::parse($v) : null;
 
         return $this->query()
             ->get()
@@ -61,9 +64,9 @@ class PccReportExport implements ExcelExport
     {
         $sheet->freezePane('A2');
         $sheet->getStyle('A1:K1')->getFont()->setBold(true);
-        $sheet->getStyle('A1:K1')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('A1:K1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle('A1:K1')->getFill()
-            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setARGB('FFEAEAEA');
     }
 

@@ -9,8 +9,6 @@ trait HasUlid
     /**
      * Initialize the trait by setting key properties.
      * This method is automatically called by Eloquent.
-     *
-     * @return void
      */
     public function initializeHasUlid(): void
     {
@@ -21,14 +19,12 @@ trait HasUlid
 
     /**
      * Automatically generate a ULID for the primary key on creation.
-     *
-     * @return void
      */
     protected static function bootHasUlid(): void
     {
         static::creating(function ($model) {
             // Only generate a ULID if the key is not already set
-            if (!$model->getKey()) {
+            if (! $model->getKey()) {
                 $model->{$model->getKeyName()} = (string) Str::ulid();
             }
         });

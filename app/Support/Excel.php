@@ -21,7 +21,7 @@ class Excel
      */
     public static function download(ExcelExport $export, string $filename, ?string $type = 'Xlsx'): BinaryFileResponse
     {
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
 
         static::writeHeadings($sheet, $export->headings());
@@ -114,6 +114,7 @@ class Excel
             } catch (\Throwable $e) {
                 if (method_exists($import, 'onError')) {
                     $import->onError($e);
+
                     continue;
                 }
 

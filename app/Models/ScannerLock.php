@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Cache;
+use App\Notifications\ScannerLockedNotification;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class ScannerLock extends Model
 {
@@ -34,7 +36,7 @@ class ScannerLock extends Model
      */
     public static function isLocked(string $identifier, ?string $userId = null): bool
     {
-        if (!$userId) {
+        if (! $userId) {
             return false;
         }
 
@@ -53,7 +55,7 @@ class ScannerLock extends Model
      */
     public static function getActiveLock(string $identifier, ?string $userId = null): ?self
     {
-        if (!$userId) {
+        if (! $userId) {
             return null;
         }
 
@@ -66,7 +68,7 @@ class ScannerLock extends Model
     /**
      * Get all active locks for a scanner (for supervisors to view)
      */
-    public static function getAllActiveLocks(string $identifier): \Illuminate\Support\Collection
+    public static function getAllActiveLocks(string $identifier): Collection
     {
         return static::where('scanner_identifier', $identifier)
             ->where('locked_until', '>', now())
@@ -79,7 +81,7 @@ class ScannerLock extends Model
      */
     public static function lockScanner(string $identifier, int $minutes, ?string $reason = null, ?string $userId = null, ?array $metadata = null): self
     {
-        if (!$userId) {
+        if (! $userId) {
             throw new \InvalidArgumentException('User ID is required for scanner locks');
         }
 
@@ -88,7 +90,7 @@ class ScannerLock extends Model
 
         // If minutes is 0, set lock to max timestamp value (2038-01-19 for MySQL TIMESTAMP)
         // This is effectively unlimited and requires manual unlock
-        $lockedUntil = $minutes === 0 
+        $lockedUntil = $minutes === 0
             ? Carbon::create(2038, 1, 19, 3, 14, 7) // Max TIMESTAMP value
             : now()->addMinutes($minutes);
 
@@ -122,7 +124,7 @@ class ScannerLock extends Model
         $unlockPermission = $config['unlock_permission'] ?? null;
         $scannerName = $config['display_name'] ?? $lock->scanner_identifier;
 
-        if (!$unlockPermission) {
+        if (! $unlockPermission) {
             return;
         }
 
@@ -138,7 +140,7 @@ class ScannerLock extends Model
             ->get();
 
         // Send notification to each supervisor
-        $notification = new \App\Notifications\ScannerLockedNotification(
+        $notification = new ScannerLockedNotification(
             scannerName: $scannerName,
             userName: $lock->user->name ?? 'Unknown User',
             reason: $lock->reason ?? 'unknown',
@@ -157,7 +159,7 @@ class ScannerLock extends Model
      */
     public static function unlockScanner(string $identifier, ?string $userId = null): bool
     {
-        if (!$userId) {
+        if (! $userId) {
             return false;
         }
 
@@ -175,7 +177,7 @@ class ScannerLock extends Model
      */
     public function getRemainingSeconds(): int
     {
-        if (!$this->locked_until || now()->gte($this->locked_until)) {
+        if (! $this->locked_until || now()->gte($this->locked_until)) {
             return 0;
         }
 
@@ -192,7 +194,7 @@ class ScannerLock extends Model
      */
     public function isExpired(): bool
     {
-        return !$this->locked_until || now()->gte($this->locked_until);
+        return ! $this->locked_until || now()->gte($this->locked_until);
     }
 
     /**

@@ -21,11 +21,12 @@ class HpmPccImport implements ExcelImport
         $this->summary['total']++;
 
         $slipBarcode = isset($row['slip_barcode']) ? (string) $row['slip_barcode'] : null;
-        if (!$slipBarcode) {
+        if (! $slipBarcode) {
             Log::warning('slip_barcode kosong pada baris import PCC, baris dilewati', [
                 'row' => $rowNumber,
             ]);
             $this->summary['skipped']++;
+
             return;
         }
 
@@ -41,7 +42,7 @@ class HpmPccImport implements ExcelImport
                     ->year(now()->year)
                     ->toDateString();
             } catch (\Exception $e) {
-                if (!empty($dateString)) {
+                if (! empty($dateString)) {
                     Log::warning('Format tanggal tidak valid pada baris import PCC', [
                         'row' => $rowNumber,
                         'slip_barcode' => $slipBarcode,
@@ -56,7 +57,7 @@ class HpmPccImport implements ExcelImport
             try {
                 $convertedTime = Carbon::createFromFormat('H:i', (string) $timeString)->toTimeString();
             } catch (\Exception $e) {
-                if (!empty($timeString)) {
+                if (! empty($timeString)) {
                     Log::warning('Format waktu tidak valid pada baris import PCC', [
                         'row' => $rowNumber,
                         'slip_barcode' => $slipBarcode,

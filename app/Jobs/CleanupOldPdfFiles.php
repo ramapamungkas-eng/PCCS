@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Services\PlaywrightPdfService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -27,12 +26,11 @@ class CleanupOldPdfFiles implements ShouldQueue
      */
     protected string $disk = 'public';
 
-    public function handle(PlaywrightPdfService $pdfService): void
+    public function handle(): void
     {
         Log::info("Starting cleanup of old PDF files in {$this->directory}...");
 
         $deletedCount = $this->cleanPdfDirectory();
-        $pdfService->cleanTemporaryFiles(24);
 
         Log::info('Cleanup complete. Total PDF files deleted: '.$deletedCount);
     }

@@ -5,8 +5,8 @@ namespace App\Notifications;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
-use NotificationChannels\WebPush\WebPushMessage;
 use NotificationChannels\WebPush\WebPushChannel;
+use NotificationChannels\WebPush\WebPushMessage;
 
 class ScannerLockedNotification extends Notification implements ShouldQueue
 {
@@ -42,15 +42,15 @@ class ScannerLockedNotification extends Notification implements ShouldQueue
         $reasonConfig = config("scanner-lock.reasons.{$this->reason}");
         $reasonDisplay = $reasonConfig['display_message'] ?? $this->reason;
         $severity = $reasonConfig['severity'] ?? 'medium';
-        
-        $icon = match($severity) {
+
+        $icon = match ($severity) {
             'high' => '❌',
             'medium' => '⚠️',
             'low' => 'ℹ️',
             default => '⚠️'
         };
 
-        return (new WebPushMessage())
+        return (new WebPushMessage)
             ->title("{$icon} Scanner Locked - {$this->scannerName}")
             ->body("{$this->userName} is locked out. Reason: {$reasonDisplay}")
             ->icon('/favicon.ico')

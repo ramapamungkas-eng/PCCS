@@ -8,8 +8,7 @@ class ExcelValidationFailure
         private readonly int $row,
         private readonly string $attribute,
         private readonly array $errors,
-    ) {
-    }
+    ) {}
 
     public function row(): int
     {

@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\Customer\HPM\Pcc;
 use App\Models\User;
 use App\Notifications\PrintJobComplete;
-use App\Services\PlaywrightPdfService;
+use App\Services\PdfService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -213,29 +213,14 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
 
         $html = view('components.ui.labels.pcc', ['labels' => $labels])->render();
 
-        $playwright = app(PlaywrightPdfService::class);
+        $pdf = app(PdfService::class);
 
-        $temporaryPdfPath = $playwright->generate($html, [
+        $pdf->generate($html, [
+            'outputPath' => $fullPath,
             'format' => 'A4',
             'margin' => ['top' => '0', 'right' => '0', 'bottom' => '0', 'left' => '0'],
-            'printBackground' => true,
-            'waitUntil' => 'networkidle',
             'timeout' => 300,
-            'executablePath' => config('app.playwright_chromium_path'),
-            'args' => [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-web-security',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-software-rasterizer',
-                '--disable-breakpad',
-                '--mute-audio',
-                '--font-render-hinting=none',
-            ],
         ]);
-
-        rename($temporaryPdfPath, $fullPath);
 
         return $storagePath;
     }
@@ -265,8 +250,7 @@ class PrintLabelsPCC implements ShouldBeUnique, ShouldQueue
         $isChromeError = str_contains($msg, 'Browser')
             || str_contains($msg, 'Chrome')
             || str_contains($msg, 'Puppeteer')
-            || str_contains($msg, 'Playwright')
-            || str_contains($msg, 'Could not start Chrome');
+            || str_contains($msg, 'Browsershot');
 
         Log::error('PrintLabelsPCC Failed', [
             'user' => $this->user->id,

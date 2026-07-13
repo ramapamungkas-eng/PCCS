@@ -10,8 +10,11 @@ use Illuminate\Support\Facades\Log;
 class FinishGoodImport implements ExcelImport
 {
     private int $rowCount = 0;
+
     private int $duplicateCount = 0;
+
     private int $uniqueCount = 0;
+
     private array $customerCache = [];
 
     public function __construct()
@@ -25,13 +28,14 @@ class FinishGoodImport implements ExcelImport
 
         $customerId = $this->customerCache[$row['customer_code']] ?? null;
 
-        if (!$customerId) {
+        if (! $customerId) {
             Log::warning('FinishGood Import: Customer not found', [
                 'row' => $rowNumber,
                 'customer_code' => $row['customer_code'],
                 'part_number' => $row['part_number'] ?? null,
             ]);
             $this->duplicateCount++;
+
             return;
         }
 
@@ -41,6 +45,7 @@ class FinishGoodImport implements ExcelImport
 
         if ($existing) {
             $this->duplicateCount++;
+
             return;
         }
 

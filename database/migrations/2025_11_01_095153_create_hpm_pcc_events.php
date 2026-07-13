@@ -25,7 +25,7 @@ return new class extends Migration
 
             // add indexes for faster queries
             $table->index('pcc_trace_id');
-            $table->index('event_type'); 
+            $table->index('event_type');
         });
     }
 

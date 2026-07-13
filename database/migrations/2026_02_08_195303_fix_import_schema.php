@@ -32,7 +32,7 @@ return new class extends Migration
                 $table->string('slip_no', 200)->nullable()->change();
                 $table->string('hns', 50)->nullable()->change();
             });
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             // If change() fails, use raw SQL for PostgreSQL
             DB::statement('ALTER TABLE pccs ALTER COLUMN slip_barcode TYPE VARCHAR(50)');
             DB::statement('ALTER TABLE pccs ALTER COLUMN "from" TYPE VARCHAR(100)');

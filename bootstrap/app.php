@@ -1,8 +1,13 @@
 <?php
 
+use App\Http\Middleware\Google2FAMiddleware;
+use App\Http\Middleware\SetLocale;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Spatie\Permission\Middleware\RoleMiddleware;
+use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -12,14 +17,14 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         // Set application locale per request
-        $middleware->appendToGroup('web', \App\Http\Middleware\SetLocale::class);
-        $middleware->trustProxies(at: '*');   
+        $middleware->appendToGroup('web', SetLocale::class);
+        $middleware->trustProxies(at: '*');
         // ✅ Tambahkan alias middleware Spatie di sini
         $middleware->alias([
-            'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
-            'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
-            'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
-            '2fa' => \App\Http\Middleware\Google2FAMiddleware::class,
+            'role' => RoleMiddleware::class,
+            'permission' => PermissionMiddleware::class,
+            'role_or_permission' => RoleOrPermissionMiddleware::class,
+            '2fa' => Google2FAMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

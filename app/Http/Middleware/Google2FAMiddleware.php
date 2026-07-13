@@ -16,12 +16,12 @@ class Google2FAMiddleware
         $user = $request->user();
 
         // Skip 2FA for non-authenticated users
-        if (!$user) {
+        if (! $user) {
             return $next($request);
         }
 
         // Skip 2FA for users who haven't enabled it
-        if (!$user->google2fa_enabled) {
+        if (! $user->google2fa_enabled) {
             return $next($request);
         }
 

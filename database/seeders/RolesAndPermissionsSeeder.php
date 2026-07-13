@@ -4,9 +4,9 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use App\Models\User;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 class RolesAndPermissionsSeeder extends Seeder
 {
@@ -18,7 +18,7 @@ class RolesAndPermissionsSeeder extends Seeder
     public function run(): void
     {
         // Reset cached roles and permissions
-        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
         // Create permissions
         $permissions = [
@@ -41,7 +41,7 @@ class RolesAndPermissionsSeeder extends Seeder
 
         $weldRole = Role::firstOrCreate(['name' => 'weld']);
         $weldRole->givePermissionTo(['weld.unlock-scanner']);
-        
+
         $qualityRole = Role::firstOrCreate(['name' => 'quality']);
         $qualityRole->givePermissionTo(['qa.unlock-scanner']);
 

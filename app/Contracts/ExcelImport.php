@@ -7,8 +7,8 @@ interface ExcelImport
     /**
      * Process a single row of imported data.
      *
-     * @param array $row Associative array keyed by lower-cased header names.
-     * @param int $rowNumber The 1-based spreadsheet row number (header is row 1).
+     * @param  array  $row  Associative array keyed by lower-cased header names.
+     * @param  int  $rowNumber  The 1-based spreadsheet row number (header is row 1).
      */
     public function processRow(array $row, int $rowNumber): void;
 

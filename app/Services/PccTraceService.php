@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Models\Customer\HPM\Pcc;
-use App\Models\Customer\HPM\PccTrace;
 use App\Models\Customer\HPM\PccEvent;
+use App\Models\Customer\HPM\PccTrace;
 
 class PccTraceService
 {
@@ -14,9 +14,10 @@ class PccTraceService
     public static function findPccByBarcode(string $barcode, array $with = []): ?Pcc
     {
         $query = Pcc::query();
-        if (!empty($with)) {
+        if (! empty($with)) {
             $query->with($with);
         }
+
         return $query->where('slip_barcode', $barcode)->first();
     }
 
@@ -26,9 +27,10 @@ class PccTraceService
     public static function findPccByBarcodeOrSlip(string $value, array $with = []): ?Pcc
     {
         $query = Pcc::query();
-        if (!empty($with)) {
+        if (! empty($with)) {
             $query->with($with);
         }
+
         return $query->where('slip_barcode', $value)
             ->orWhere('slip_no', $value)
             ->first();
@@ -39,9 +41,10 @@ class PccTraceService
      */
     public static function getCurrentTrace(?Pcc $pcc): ?PccTrace
     {
-        if (!$pcc) {
+        if (! $pcc) {
             return null;
         }
+
         return PccTrace::where('pcc_id', $pcc->id)->first();
     }
 
@@ -53,6 +56,7 @@ class PccTraceService
     {
         $pcc = self::findPccByBarcode($barcode, $with);
         $trace = self::getCurrentTrace($pcc);
+
         return ['pcc' => $pcc, 'trace' => $trace];
     }
 
@@ -61,9 +65,10 @@ class PccTraceService
      */
     public static function getRecentEvent(?PccTrace $trace, string $eventType, int $minutes = 5): ?PccEvent
     {
-        if (!$trace) {
+        if (! $trace) {
             return null;
         }
+
         return PccEvent::where('pcc_trace_id', $trace->id)
             ->where('event_type', $eventType)
             ->where('event_timestamp', '>', now()->subMinutes($minutes))
@@ -75,9 +80,10 @@ class PccTraceService
      */
     public static function getLastEvent(?PccTrace $trace, string $eventType): ?PccEvent
     {
-        if (!$trace) {
+        if (! $trace) {
             return null;
         }
+
         return PccEvent::where('pcc_trace_id', $trace->id)
             ->where('event_type', $eventType)
             ->latest('event_timestamp')
@@ -99,20 +105,22 @@ class PccTraceService
     public static function validateStageTransition(?PccTrace $trace, string $eventType, bool $isDirect): array
     {
         // No trace: check if this is a valid initial stage
-        if (!$trace) {
+        if (! $trace) {
             $validInitialStages = ['PRODUCTION CHECK']; // ASSY starts here
             if ($isDirect) {
                 $validInitialStages[] = 'PDI CHECK'; // DIRECT can start at PDI CHECK
             }
-            
-            if (!in_array($eventType, $validInitialStages, true)) {
+
+            if (! in_array($eventType, $validInitialStages, true)) {
                 $required = $isDirect ? 'PDI CHECK' : 'PRODUCTION CHECK';
+
                 return [
                     'valid' => false,
                     'message' => "Label has not been processed yet. Must go through '{$required}' first.",
                     'expected' => $required,
                 ];
             }
+
             return ['valid' => true, 'message' => null, 'expected' => null];
         }
 
@@ -146,7 +154,7 @@ class PccTraceService
         $flow = $stageFlows[$type];
 
         // Check if target event is in the flow
-        if (!isset($flow[$eventType])) {
+        if (! isset($flow[$eventType])) {
             return [
                 'valid' => false,
                 'message' => "'{$eventType}' is not a valid stage for {$type} parts.",
@@ -155,7 +163,7 @@ class PccTraceService
         }
 
         $expectedStage = $flow[$eventType];
-        
+
         // Initial stage (no prerequisite)
         if ($expectedStage === null) {
             return ['valid' => true, 'message' => null, 'expected' => null];

@@ -4,7 +4,9 @@ namespace App\Imports;
 
 use App\Contracts\ExcelImport;
 use App\Models\Customer\HPM\Schedule;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class HpmScheduleImport implements ExcelImport
 {
@@ -21,9 +23,10 @@ class HpmScheduleImport implements ExcelImport
 
         $slipNumber = isset($row['slip_number']) ? (string) $row['slip_number'] : null;
 
-        if (!$slipNumber) {
+        if (! $slipNumber) {
             Log::warning('⚠️ slip_number kosong pada baris import, baris dilewati', ['row' => $rowNumber, 'row_data' => $row]);
             $this->summary['skipped']++;
+
             return;
         }
 
@@ -104,34 +107,40 @@ class HpmScheduleImport implements ExcelImport
                 $y = substr($str, 0, 4);
                 $m = substr($str, 4, 2);
                 $d = substr($str, 6, 2);
-                $date = \Carbon\Carbon::createFromFormat('Y-m-d', "$y-$m-$d");
+                $date = Carbon::createFromFormat('Y-m-d', "$y-$m-$d");
                 Log::debug('📅 Parsed yyyymmdd date', ['input' => $str, 'output' => $date->format('Y-m-d')]);
+
                 return $date->format('Y-m-d');
             }
 
             if (preg_match('/^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/', $str)) {
                 try {
-                    $date = \Carbon\Carbon::createFromFormat('d-M-y', $str);
+                    $date = Carbon::createFromFormat('d-M-y', $str);
                     Log::debug('📅 Parsed dd-MMM-yy date', ['input' => $str, 'output' => $date->format('Y-m-d')]);
+
                     return $date->format('Y-m-d');
                 } catch (\Exception $e) {
-                    $date = \Carbon\Carbon::createFromFormat('d-M-Y', $str);
+                    $date = Carbon::createFromFormat('d-M-Y', $str);
                     Log::debug('📅 Parsed dd-MMM-YYYY date', ['input' => $str, 'output' => $date->format('Y-m-d')]);
+
                     return $date->format('Y-m-d');
                 }
             }
 
             if (is_numeric($str) && (float) $str > 1000) {
-                $date = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float) $str);
+                $date = Date::excelToDateTimeObject((float) $str);
                 Log::debug('📅 Parsed Excel serial date', ['input' => $str, 'output' => $date->format('Y-m-d')]);
+
                 return $date->format('Y-m-d');
             }
 
-            $date = \Carbon\Carbon::parse($str);
+            $date = Carbon::parse($str);
             Log::debug('📅 Parsed generic date', ['input' => $str, 'output' => $date->format('Y-m-d')]);
+
             return $date->format('Y-m-d');
         } catch (\Exception $e) {
             Log::warning('⚠️ Gagal parse date', ['value' => $value, 'error' => $e->getMessage()]);
+
             return null;
         }
     }
@@ -146,14 +155,15 @@ class HpmScheduleImport implements ExcelImport
             $str = trim((string) $value);
 
             if (is_numeric($str) && strpos($str, '.') !== false && (float) $str < 1) {
-                $time = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float) $str);
+                $time = Date::excelToDateTimeObject((float) $str);
                 Log::debug('⏰ Parsed Excel time fraction', ['input' => $str, 'output' => $time->format('H:i:s')]);
+
                 return $time->format('H:i:s');
             }
 
             if (preg_match('/^\d{1,6}$/', $str)) {
                 if (strlen($str) <= 4) {
-                    $padded = str_pad($str, 4, '0', STR_PAD_LEFT) . '00';
+                    $padded = str_pad($str, 4, '0', STR_PAD_LEFT).'00';
                 } else {
                     $padded = str_pad($str, 6, '0', STR_PAD_LEFT);
                 }
@@ -164,20 +174,24 @@ class HpmScheduleImport implements ExcelImport
                 $h = $h % 24;
                 $result = sprintf('%02d:%02d:%02d', $h, $m, $s);
                 Log::debug('⏰ Parsed numeric time', ['input' => $str, 'padded' => $padded, 'output' => $result]);
+
                 return $result;
             }
 
             if (preg_match('/^\d{1,2}:\d{2}(:\d{2})?$/', $str)) {
-                $result = strlen($str) === 5 ? $str . ':00' : $str;
+                $result = strlen($str) === 5 ? $str.':00' : $str;
                 Log::debug('⏰ Parsed H:i time', ['input' => $str, 'output' => $result]);
+
                 return $result;
             }
 
-            $time = \Carbon\Carbon::parse($str);
+            $time = Carbon::parse($str);
             Log::debug('⏰ Parsed generic time', ['input' => $str, 'output' => $time->format('H:i:s')]);
+
             return $time->format('H:i:s');
         } catch (\Exception $e) {
             Log::warning('⚠️ Gagal parse time', ['value' => $value, 'error' => $e->getMessage()]);
+
             return null;
         }
     }

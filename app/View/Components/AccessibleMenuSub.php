@@ -2,8 +2,8 @@
 
 namespace App\View\Components;
 
-use Illuminate\View\Component;
 use Illuminate\Contracts\View\View;
+use Illuminate\View\Component;
 
 class AccessibleMenuSub extends Component
 {
@@ -18,7 +18,7 @@ class AccessibleMenuSub extends Component
         public ?bool $hidden = false,
         public ?bool $disabled = false,
     ) {
-        $this->uuid = 'accessible-menu-sub-' . md5(serialize($this)) . $id;
+        $this->uuid = 'accessible-menu-sub-'.md5(serialize($this)).$id;
     }
 
     public function render(): View|string

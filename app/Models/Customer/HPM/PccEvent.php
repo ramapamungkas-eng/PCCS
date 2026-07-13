@@ -2,8 +2,9 @@
 
 namespace App\Models\Customer\HPM;
 
-use Illuminate\Database\Eloquent\Model;
 use App\Models\Traits\HasUlid;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 
 class PccEvent extends Model
 {
@@ -14,7 +15,7 @@ class PccEvent extends Model
     protected $fillable = [
         'pcc_trace_id',
         'event_users',
-        'event_type', //'PRODUCTION CHECK', 'RECEIVED', 'PDI CHECK', 'DELIVERY'
+        'event_type', // 'PRODUCTION CHECK', 'RECEIVED', 'PDI CHECK', 'DELIVERY'
         'event_timestamp',
         'remarks',
     ];
@@ -29,9 +30,9 @@ class PccEvent extends Model
         return $this->belongsTo(PccTrace::class, 'pcc_trace_id', 'id');
     }
 
-    //relasi ke model User (event_users)
+    // relasi ke model User (event_users)
     public function user()
     {
-        return $this->belongsTo(\App\Models\User::class, 'event_users', 'id');
+        return $this->belongsTo(User::class, 'event_users', 'id');
     }
 }

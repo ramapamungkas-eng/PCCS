@@ -9,12 +9,12 @@ use Illuminate\Support\Facades\Storage;
 
 /**
  * Trait for managing two-stage cross-check scan workflow
- * 
+ *
  * Workflow:
  * 1. Stage 1 (empty): Scan PCC barcode → validate → load CCPs → move to 'await_ccp_qr'
  * 2. Stage 2 (await_ccp_qr): Scan physical part → cross-check against alias → move to 'confirmation'
  * 3. Stage 3 (confirmation): Show CCP overlay → user confirms → finalize
- * 
+ *
  * Usage:
  * 1. Add trait to component: use HasCrossCheckScan;
  * 2. Define required properties in component (see below)
@@ -48,6 +48,7 @@ trait HasCrossCheckScan
             $this->warning('Scan kosong. Melewati pemeriksaan dan melanjutkan.', position: 'toast-top', timeout: 10000);
             $this->dispatch('scan-feedback', type: 'warning');
             $this->onCrossCheckSkipped();
+
             return true;
         }
 
@@ -57,6 +58,7 @@ trait HasCrossCheckScan
             $this->scanStage = 'confirmation';
             $this->success('✓ Cross-check cocok! Periksa CCP di bawah, lalu konfirmasi.', position: 'toast-top');
             $this->dispatch('scan-feedback', type: 'success');
+
             return true;
         }
 
@@ -94,7 +96,7 @@ trait HasCrossCheckScan
         $activeCcps = collect();
         if ($pcc->relationLoaded('finishGood') && $pcc->finishGood) {
             $activeCcps = ($pcc->finishGood->ccps ?? collect())
-                ->filter(fn($c) => (bool) $c->is_active)
+                ->filter(fn ($c) => (bool) $c->is_active)
                 ->values();
         }
 
@@ -103,7 +105,7 @@ trait HasCrossCheckScan
             $this->ccpItems = $activeCcps->map(function ($ccp) {
                 return [
                     'id' => $ccp->id,
-                    'img' => $ccp->check_point_img ? Storage::url('hpm/ccp/' . $ccp->check_point_img) : null,
+                    'img' => $ccp->check_point_img ? Storage::url('hpm/ccp/'.$ccp->check_point_img) : null,
                     'revision' => $ccp->revision,
                     'description' => $ccp->description,
                 ];
@@ -114,7 +116,7 @@ trait HasCrossCheckScan
 
         // Move to Stage 2
         $this->scanStage = 'await_ccp_qr';
-        $this->warning('Scan berhasil! Sekarang lakukan scan fisik untuk cross-check (harus sama dengan label: ' . $this->pendingPccAlias . ')', position: 'toast-top', timeout: 0);
+        $this->warning('Scan berhasil! Sekarang lakukan scan fisik untuk cross-check (harus sama dengan label: '.$this->pendingPccAlias.')', position: 'toast-top', timeout: 0);
         $this->dispatch('scan-feedback', type: 'warning');
     }
 

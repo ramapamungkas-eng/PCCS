@@ -155,7 +155,6 @@ return [
     |
     */
 
-    'playwright_chromium_path' => env('PLAYWRIGHT_CHROMIUM_PATH', ''),
     'print_progress_cache_store' => env('PRINT_PROGRESS_CACHE_STORE', 'file'),
 
 ];

@@ -42,7 +42,7 @@ return [
     /**
      * Scanner-specific configurations
      * Override defaults for specific scanner types
-     * 
+     *
      * Available scanner identifiers:
      * - weld-production-check
      * - qa-pdi-check
@@ -53,13 +53,13 @@ return [
             'requires_supervisor_unlock' => true,
             'lock_duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'max_lock_duration_minutes' => 0,  // No limit
-            
+
             // Permission required to unlock this scanner
             'unlock_permission' => 'weld.unlock-scanner',
-            
+
             // Display name for UI
             'display_name' => 'Weld - Production Check',
-            
+
             // Description
             'description' => 'Scanner untuk verifikasi produksi welding',
         ],
@@ -68,7 +68,7 @@ return [
             'requires_supervisor_unlock' => true,
             'lock_duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'max_lock_duration_minutes' => 0,  // No limit
-            
+
             'unlock_permission' => 'qa.unlock-scanner',
             'display_name' => 'QA - PDI Check',
             'description' => 'Scanner untuk quality assurance dan PDI check',
@@ -78,7 +78,7 @@ return [
             'requires_supervisor_unlock' => true,
             'lock_duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'max_lock_duration_minutes' => 0,  // No limit
-            
+
             'unlock_permission' => 'delivery.unlock-scanner',
             'display_name' => 'PPIC - Delivery',
             'description' => 'Scanner untuk proses delivery oleh PPIC',
@@ -95,25 +95,25 @@ return [
             'display_message' => 'Cross-check tidak cocok',
             'severity' => 'high',
         ],
-        
+
         'duplicate-scan' => [
             'duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'display_message' => 'Duplikat terdeteksi',
             'severity' => 'medium',
         ],
-        
+
         'invalid-stage-early' => [
             'duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'display_message' => 'Tahap tidak valid (terlalu awal)',
             'severity' => 'medium',
         ],
-        
+
         'invalid-stage' => [
             'duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'display_message' => 'Tahap tidak valid',
             'severity' => 'medium',
         ],
-        
+
         'already-delivered' => [
             'duration_minutes' => 0,  // Unlimited - requires supervisor unlock
             'display_message' => 'Label sudah terkirim',
