@@ -84,8 +84,13 @@ echo ""
 log_info "[1/6] Installing npm dependencies..."
 cd "$APP_DIR"
 
-# Fix permissions — node_modules may have been written by root from prior runs
+# Fix permissions — node_modules and npm cache may be root-owned from prior runs
 [ -d node_modules ] && chown -R "$APP_USER":"$APP_USER" node_modules 2>/dev/null || true
+
+app_home=$(sudo -u "$APP_USER" bash -c 'echo "$HOME"' 2>/dev/null || echo "/var/www")
+for cache_dir in "$app_home/.npm" /var/www/.npm; do
+    [ -d "$cache_dir" ] && chown -R "$APP_USER":"$APP_USER" "$cache_dir" 2>/dev/null || true
+done
 
 if [ ! -d "node_modules" ]; then
     log_info "  node_modules missing, running npm install..."
