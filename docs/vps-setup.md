@@ -5,7 +5,7 @@ Deploy this Laravel 12 + Livewire/Volt + Tailwind CSS application on an Ubuntu s
 ## Stack assumptions
 
 - Ubuntu 24.04 LTS
-- Apache2 + PHP 8.4-FPM
+- Apache2 + PHP 8.5-FPM
 - SQLite (default) or MySQL/PostgreSQL
 - Node.js + npm (required by Playwright for PDF/label generation)
 - Chromium or Google Chrome (Playwright can download Chromium automatically, but a system Chrome/Chromium works too)
@@ -17,9 +17,9 @@ Deploy this Laravel 12 + Livewire/Volt + Tailwind CSS application on an Ubuntu s
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y apache2 php8.4-fpm php8.4-cli php8.4-sqlite3 php8.4-mysql php8.4-pgsql \
-    php8.4-mbstring php8.4-xml php8.4-bcmath php8.4-curl php8.4-zip php8.4-intl \
-    php8.4-redis unzip git curl redis-server
+sudo apt install -y apache2 php8.5-fpm php8.5-cli php8.5-sqlite3 php8.5-mysql php8.5-pgsql \
+    php8.5-mbstring php8.5-xml php8.5-bcmath php8.5-curl php8.5-zip php8.5-intl \
+    php8.5-redis unzip git curl redis-server
 ```
 
 Install Chromium for PDF generation:
@@ -191,7 +191,7 @@ Enable required modules:
 
 ```bash
 sudo a2enmod rewrite proxy proxy_http ssl headers setenvif proxy_fcgi
-sudo a2enconf php8.4-fpm
+sudo a2enconf php8.5-fpm
 sudo systemctl restart apache2
 ```
 
@@ -221,7 +221,7 @@ Create `/etc/apache2/sites-available/pccs.conf`:
         Require all granted
     </Directory>
 
-    ProxyPassMatch ^/(.*\.php)$ unix:/var/run/php/php8.4-fpm.sock|fcgi://127.0.0.1:9000/var/www/pccs/public/$1
+    ProxyPassMatch ^/(.*\.php)$ unix:/var/run/php/php8.5-fpm.sock|fcgi://127.0.0.1:9000/var/www/pccs/public/$1
 
     RequestHeader set X-Forwarded-Proto "https" env=HTTPS
 
@@ -280,7 +280,7 @@ Then restart services:
 
 ```bash
 sudo systemctl restart pccs-queue
-sudo systemctl reload php8.4-fpm
+sudo systemctl reload php8.5-fpm
 sudo systemctl reload apache2
 ```
 

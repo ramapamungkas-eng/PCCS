@@ -40,11 +40,22 @@ final class PlaywrightPdfService
             throw new RuntimeException("Playwright PDF script not found: {$nodeScript}");
         }
 
-        $options['executablePath'] = filled($options['executablePath'] ?? null)
+        $executablePath = filled($options['executablePath'] ?? null)
             ? $options['executablePath']
             : (filled(config('app.playwright_chromium_path'))
                 ? config('app.playwright_chromium_path')
                 : $this->detectSystemChromium());
+
+        if (! $executablePath || ! file_exists($executablePath)) {
+            @unlink($htmlPath);
+            throw new RuntimeException(
+                'Chromium browser not found. Please install Playwright on this server: '.
+                'run "npx playwright install chromium" in your project directory, '.
+                'then "npx playwright install-deps chromium" (as root) to install system dependencies.'
+            );
+        }
+
+        $options['executablePath'] = $executablePath;
 
         $process = new Process([
             'node',
@@ -65,15 +76,25 @@ final class PlaywrightPdfService
         if (! $process->isSuccessful()) {
             @unlink($outputPath);
 
+            $errorOutput = $process->getErrorOutput();
+
             Log::error('Playwright PDF generation failed', [
                 'command' => $process->getCommandLine(),
                 'output' => $process->getOutput(),
-                'error' => $process->getErrorOutput(),
+                'error' => $errorOutput,
             ]);
 
-            throw new RuntimeException(
-                'PDF generation failed: '.$process->getErrorOutput()
-            );
+            $message = 'PDF generation failed: '.$errorOutput;
+
+            if (str_contains($errorOutput, 'SIGTRAP')
+                || str_contains($errorOutput, 'Target page, context or browser has been closed')
+                || str_contains($errorOutput, 'crashpad')) {
+                $message .= "\n\nChromium crashed on startup. This usually means missing system libraries.\n".
+                    "Fix: run 'npx playwright install-deps chromium' (as root) on your VPS to install them,\n".
+                    'then restart your queue worker.';
+            }
+
+            throw new RuntimeException($message);
         }
 
         if (! file_exists($outputPath) || filesize($outputPath) === 0) {
@@ -110,6 +131,72 @@ final class PlaywrightPdfService
         }
     }
 
+    /**
+     * Diagnostic check: verify the Chromium binary can be launched.
+     *
+     * @return array{ok: bool, executable: ?string, version: ?string, diagnostics: string[]}
+     */
+    public function diagnose(): array
+    {
+        $diagnostics = [];
+        $executable = filled(config('app.playwright_chromium_path'))
+            ? config('app.playwright_chromium_path')
+            : $this->detectSystemChromium();
+
+        if (! $executable) {
+            return [
+                'ok' => false,
+                'executable' => null,
+                'version' => null,
+                'diagnostics' => [
+                    'No Chromium binary found. Run: npx playwright install chromium && npx playwright install-deps chromium',
+                ],
+            ];
+        }
+
+        $diagnostics[] = "Found Chromium at: {$executable}";
+
+        if (! is_executable($executable)) {
+            $diagnostics[] = "WARNING: Binary is not executable: {$executable}";
+
+            return [
+                'ok' => false,
+                'executable' => $executable,
+                'version' => null,
+                'diagnostics' => $diagnostics,
+            ];
+        }
+
+        $process = new Process([$executable, '--version']);
+        $process->run();
+
+        if ($process->isSuccessful()) {
+            $version = trim($process->getOutput());
+            $diagnostics[] = "Chromium version: {$version}";
+
+            return [
+                'ok' => true,
+                'executable' => $executable,
+                'version' => $version,
+                'diagnostics' => $diagnostics,
+            ];
+        }
+
+        $stderr = $process->getErrorOutput();
+        $diagnostics[] = "Failed to run --version: {$stderr}";
+
+        if (str_contains($stderr, 'SIGTRAP') || str_contains($stderr, 'error while loading shared libraries')) {
+            $diagnostics[] = '⚠ Missing system libraries detected — run: npx playwright install-deps chromium (as root)';
+        }
+
+        return [
+            'ok' => false,
+            'executable' => $executable,
+            'version' => null,
+            'diagnostics' => $diagnostics,
+        ];
+    }
+
     private function detectSystemChromium(): ?string
     {
         $commonPaths = [
@@ -124,6 +211,79 @@ final class PlaywrightPdfService
         foreach ($commonPaths as $path) {
             if (file_exists($path) && is_executable($path)) {
                 return $path;
+            }
+        }
+
+        return $this->findPlaywrightCacheChromium() ?? $this->findHomeCacheChromium();
+    }
+
+    private function findPlaywrightCacheChromium(): ?string
+    {
+        $cacheDir = getenv('HOME') ?: null;
+
+        if (! $cacheDir) {
+            $userInfo = function_exists('posix_getpwuid')
+                ? posix_getpwuid(function_exists('posix_geteuid') ? posix_geteuid() : 0)
+                : null;
+            $cacheDir = $userInfo['dir'] ?? null;
+        }
+
+        if ($cacheDir) {
+            $found = $this->scanPlaywrightCache("{$cacheDir}/.cache/ms-playwright");
+            if ($found) {
+                return $found;
+            }
+        }
+
+        $found = $this->scanPlaywrightCache('/var/www/.cache/ms-playwright');
+
+        return $found ?: $this->scanPlaywrightCache('/root/.cache/ms-playwright');
+    }
+
+    private function findHomeCacheChromium(): ?string
+    {
+        $homes = ['/home', '/var/www', '/root'];
+
+        foreach ($homes as $homeBase) {
+            if (! is_dir($homeBase)) {
+                continue;
+            }
+
+            foreach (scandir($homeBase) ?: [] as $entry) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
+                }
+
+                $cachePath = "{$homeBase}/{$entry}/.cache/ms-playwright";
+                $found = $this->scanPlaywrightCache($cachePath);
+                if ($found) {
+                    return $found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function scanPlaywrightCache(string $cacheDir): ?string
+    {
+        if (! is_dir($cacheDir)) {
+            return null;
+        }
+
+        $entries = scandir($cacheDir) ?: [];
+
+        rsort($entries);
+
+        foreach ($entries as $entry) {
+            if (! str_starts_with($entry, 'chromium-')) {
+                continue;
+            }
+
+            $candidate = "{$cacheDir}/{$entry}/chrome-linux64/chrome";
+
+            if (file_exists($candidate) && is_executable($candidate)) {
+                return $candidate;
             }
         }
 
