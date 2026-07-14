@@ -310,3 +310,28 @@ sudo systemctl reload apache2
 - If printing fails with `spatie/browsershot is missing`, run `composer install --no-dev --optimize-autoloader` — `spatie/browsershot` is a required dependency for PDF generation.
 - If printing fails with `node: not found`, the queue worker or PHP-FPM process does not see Node in its `PATH`. Set `Environment=PATH=/usr/local/bin:/usr/bin:/bin` in your systemd service and verify with `sudo -u www-data node -v`.
 - Always run `php artisan config:cache`, `route:cache`, and `view:cache` in production after deploying.
+
+## 13. Chromium crashpad HOME
+
+**Symptom:** `chrome_crashpad_handler: --database is required` → generic browser launch failure. Chrome's crashpad handler needs a writable `$HOME` directory; `www-data`'s default `$HOME` (`/var/www`) is root-owned and not writable, so crashpad fails and Chrome refuses to launch.
+
+**Option A — built-in (code-level):** `PdfService` already sets `HOME` via `Browsershot::setNodeEnv()`, pointing to `storage/app/temp/browsershot/chrome-home`. This is scoped to the Node process that launches Chrome — no server config changes needed. Works regardless of `QUEUE_CONNECTION` (sync vs. redis + systemd worker).
+
+**Option B — PHP-FPM pool (fallback):** If Option A doesn't cover your setup, override `HOME` for the PHP-FPM worker process:
+
+```bash
+sudo mkdir -p /var/www/pccs/storage/app/chromium-home
+sudo chown www-data:www-data /var/www/pccs/storage/app/chromium-home
+sudo chmod 700 /var/www/pccs/storage/app/chromium-home
+```
+
+Add to `/etc/php/8.5/fpm/pool.d/www.conf`:
+
+```
+env[HOME] = /var/www/pccs/storage/app/chromium-home
+```
+
+```bash
+sudo php-fpm8.5 -t
+sudo systemctl reload php8.5-fpm
+```

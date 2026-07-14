@@ -55,6 +55,8 @@ final class PdfService
                     ->timeout($timeout * 1000)
                     ->waitUntilNetworkIdle();
 
+                $browsershot->setNodeEnv(['HOME' => $tempPath.'/chrome-home']);
+
                 $browsershot->setCustomTempPath($tempPath);
 
                 $chromePath = $options['executablePath']
