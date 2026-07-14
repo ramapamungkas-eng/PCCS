@@ -37,6 +37,9 @@ final class PdfService
                 (float) $margins['left'],
             )
             ->withBrowsershot(function (Browsershot $browsershot) use ($options, $timeout) {
+                $tempPath = $options['tempPath']
+                    ?? storage_path('app/temp/browsershot');
+
                 $browsershot
                     ->noSandbox()
                     ->setOption('args', [
@@ -46,13 +49,11 @@ final class PdfService
                         '--disable-dev-shm-usage',
                         '--disable-gpu',
                         '--disable-software-rasterizer',
-                        '--disable-features=Crashpad',
+                        '--disable-crashpad-crash-upload',
+                        '--user-data-dir='.$tempPath.'/chrome-user-data',
                     ])
                     ->timeout($timeout * 1000)
                     ->waitUntilNetworkIdle();
-
-                $tempPath = $options['tempPath']
-                    ?? storage_path('app/temp/browsershot');
 
                 $browsershot->setCustomTempPath($tempPath);
 
