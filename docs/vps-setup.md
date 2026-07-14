@@ -7,8 +7,8 @@ Deploy this Laravel 12 + Livewire/Volt + Tailwind CSS application on an Ubuntu s
 - Ubuntu 24.04 LTS
 - Apache2 + PHP 8.5-FPM
 - SQLite (default) or MySQL/PostgreSQL
-- Node.js + npm (required by Playwright for PDF/label generation)
-- Chromium or Google Chrome (Playwright can download Chromium automatically, but a system Chrome/Chromium works too)
+- Node.js + npm (required by Puppeteer for PDF/label generation)
+- Chromium — Puppeteer downloads its own, or a system Chrome/Chromium can be used
 - Composer
 - Redis (recommended for cache, session, and queues)
 - Cloudflare origin certificate (optional but recommended)
@@ -20,21 +20,6 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y apache2 php8.5-fpm php8.5-cli php8.5-sqlite3 php8.5-mysql php8.5-pgsql \
     php8.5-mbstring php8.5-xml php8.5-bcmath php8.5-curl php8.5-zip php8.5-intl \
     php8.5-redis unzip git curl redis-server
-```
-
-Install Chromium for PDF generation:
-
-```bash
-sudo apt install -y chromium-browser
-```
-
-If `chromium-browser` is not available in your repository, install Google Chrome instead:
-
-```bash
-wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list'
-sudo apt update
-sudo apt install -y google-chrome-stable
 ```
 
 Install Composer and Node:
@@ -94,8 +79,10 @@ MAIL_FROM_NAME="${APP_NAME}"
 
 GOOGLE2FA_ENABLED=true
 
-# Leave empty to use the Chromium binary downloaded by Playwright.
-PLAYWRIGHT_CHROMIUM_PATH=
+# PDF generation (spatie/laravel-pdf + Puppeteer/Browsershot)
+LARAVEL_PDF_DRIVER=browsershot
+LARAVEL_PDF_CHROME_PATH=
+LARAVEL_PDF_NO_SANDBOX=true
 
 # Cache store for print progress; must persist across requests.
 # Use 'redis' if you run multiple app servers, otherwise 'file' is fine.
@@ -107,7 +94,7 @@ PRINT_PROGRESS_CACHE_STORE=file
 ```bash
 composer install --no-dev --optimize-autoloader
 npm install
-npx playwright install chromium
+npx puppeteer browsers install chrome
 npm run build
 ```
 
@@ -129,11 +116,22 @@ Create the storage symlink:
 php artisan storage:link
 ```
 
+Create the Browsershot temp directory (required for Snap Chromium on Ubuntu 24.04):
+
+```bash
+mkdir -p storage/app/temp/browsershot
+chown -R www-data:www-data storage/app/temp
+chmod -R 775 storage/app/temp
+```
+
 ## 6. Permissions
 
 ```bash
 sudo chown -R www-data:www-data storage bootstrap/cache public/build
 sudo chmod -R 775 storage bootstrap/cache
+
+# Ensure Browsershot temp dir is writable
+sudo chown -R www-data:www-data storage/app/temp
 ```
 
 ## 7. Queue worker (systemd)
@@ -170,7 +168,7 @@ Verify that the worker user can access Node and Chromium:
 
 ```bash
 sudo -u www-data node -v
-sudo -u www-data /usr/bin/chromium --version
+sudo -u www-data npx puppeteer browsers find chrome
 ```
 
 ## 8. Scheduler
@@ -260,7 +258,23 @@ SSLVerifyClient require
 SSLCACertificateFile /etc/ssl/certs/cloudflare-origin-pull-ca.pem
 ```
 
-## 11. Updates
+## 11. Automated VPS setup
+
+Run the setup script to install Chromium system libraries, configure Puppeteer, and verify the print pipeline:
+
+```bash
+sudo bash scripts/setup-vps.sh
+```
+
+The script handles:
+- Installing npm dependencies (puppeteer)
+- Verifying PHP dependencies (spatie/browsershot)
+- Installing Chromium system libraries (libnspr4, libnss3, etc.)
+- Downloading Puppeteer's Chrome browser
+- Creating the Browsershot temp directory (avoids Snap Chromium sandbox issues)
+- Detecting and persisting the Chromium binary path in `.env`
+
+## 12. Updates
 
 ```bash
 cd /var/www/pccs
@@ -287,6 +301,8 @@ sudo systemctl reload apache2
 ## Notes
 
 - If you do not have Redis available, set `CACHE_STORE=database`, `SESSION_DRIVER=database`, and `QUEUE_CONNECTION=database`. Note that the app uses cache tags, so Redis is strongly recommended for production.
-- **Node.js and Chromium are required for PDF/label printing.** Playwright downloads its own Chromium binary, but the PHP/queue process must be able to execute Node. Run `npx playwright install chromium` after `npm install`, and run `npx playwright install-deps chromium` with root privileges if browser startup fails.
-- If printing still fails with `node: not found`, the queue worker or PHP-FPM process does not see Node in its `PATH`. Set the absolute path in your systemd service `Environment=PATH=...` or ensure Node is installed and available.
+- **Node.js and Chromium are required for PDF/label printing.** The app uses Puppeteer (via `spatie/browsershot` + `spatie/laravel-pdf`) to generate label PDFs. Run `npx puppeteer browsers install chrome` after `npm install` to download a compatible Chromium.
+- **Snap Chromium on Ubuntu 24.04**: If Chromium was installed via Snap (default on Ubuntu 24.04), it runs in a sandbox that blocks access to `/tmp/`. The app uses `storage/app/temp/browsershot` as the temp directory instead. Ensure that directory exists and is writable by the queue worker user. If you prefer not to use Snap Chromium, Puppeteer's own Chrome (installed via `npx puppeteer browsers install chrome`) avoids this issue entirely.
+- If printing fails with `spatie/browsershot is missing`, run `composer install --no-dev --optimize-autoloader` — `spatie/browsershot` is a required dependency for PDF generation.
+- If printing fails with `node: not found`, the queue worker or PHP-FPM process does not see Node in its `PATH`. Set `Environment=PATH=/usr/local/bin:/usr/bin:/bin` in your systemd service and verify with `sudo -u www-data node -v`.
 - Always run `php artisan config:cache`, `route:cache`, and `view:cache` in production after deploying.

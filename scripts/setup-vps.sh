@@ -81,7 +81,7 @@ fi
 # ── 1. Install npm dependencies ────────────
 
 echo ""
-log_info "[1/6] Installing npm dependencies..."
+log_info "[1/7] Installing npm dependencies..."
 cd "$APP_DIR"
 
 # Fix permissions — node_modules and npm cache may be root-owned from prior runs
@@ -105,10 +105,28 @@ else
     fi
 fi
 
-# ── 2. System deps for Chromium ────────────
+# ── 2. Install PHP dependencies ────────────
 
 echo ""
-log_info "[2/6] Installing Chromium system dependencies..."
+log_info "[2/7] Verifying PHP dependencies..."
+cd "$APP_DIR"
+
+if [ ! -d "vendor" ]; then
+    log_info "  vendor missing, running composer install..."
+    sudo -u "$APP_USER" composer install --no-dev --optimize-autoloader --no-interaction
+else
+    if [ -d "vendor/spatie/browsershot" ]; then
+        log_info "  spatie/browsershot: OK"
+    else
+        log_warn "  spatie/browsershot: MISSING — running composer install..."
+        sudo -u "$APP_USER" composer install --no-dev --optimize-autoloader --no-interaction
+    fi
+fi
+
+# ── 3. System deps for Chromium ────────────
+
+echo ""
+log_info "[3/7] Installing Chromium system dependencies..."
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -125,10 +143,10 @@ apt-get install -y -qq \
     libhyphen0 libmanette-0.2-0 libgles2 \
     fonts-liberation fonts-noto-color-emoji 2>&1 || true
 
-# ── 3. PHP extension checks ────────────────
+# ── 4. PHP extension checks ────────────────
 
 echo ""
-log_info "[3/6] Checking PHP extensions..."
+log_info "[4/7] Checking PHP extensions..."
 if command -v php &>/dev/null; then
     for ext in mbstring gd fileinfo pdo pdo_mysql; do
         if php -m 2>/dev/null | grep -qi "^$ext$"; then
@@ -139,42 +157,27 @@ if command -v php &>/dev/null; then
     done
 fi
 
-# ── 4. Install Puppeteer Chrome ────────────
+# ── 5. Install Puppeteer Chrome ────────────
 
 echo ""
-log_info "[4/6] Installing Chromium via Puppeteer (as $APP_USER)..."
+log_info "[5/7] Installing Chromium via Puppeteer (as $APP_USER)..."
 sudo -u "$APP_USER" npx puppeteer browsers install chrome 2>&1
 
-# ── 5. AppArmor check ──────────────────────
+# ── 6. Create Browsershot temp directory ───
 
 echo ""
-log_info "[5/6] Checking AppArmor profiles for Chromium..."
+log_info "[6/7] Creating Browsershot temp directory..."
 
-if command -v aa-status &>/dev/null; then
-    if aa-status 2>/dev/null | grep -qiE 'chrome|chromium'; then
-        log_warn "AppArmor has Chrome/Chromium profiles that may block Puppeteer!"
+BROWSERSHOT_TEMP="$APP_DIR/storage/app/temp/browsershot"
+mkdir -p "$BROWSERSHOT_TEMP"
+chown -R "$APP_USER":"$APP_USER" "$BROWSERSHOT_TEMP"
+chmod 775 "$BROWSERSHOT_TEMP"
+log_info "  Created: $BROWSERSHOT_TEMP"
 
-        if command -v aa-disable &>/dev/null; then
-            for profile in $(aa-status 2>/dev/null | grep -iE '^\s+(chrome|chromium|snap\.chromium)' | tr -d ' '); do
-                log_warn "Disabling AppArmor profile: $profile"
-                aa-disable "$profile" 2>&1 || aa-complain "$profile" 2>&1 || true
-            done
-        else
-            log_warn "apparmor-utils not installed. Install it to auto-fix:"
-            log_warn "  sudo apt install -y apparmor-utils"
-            log_warn "  sudo aa-disable chrome    # (or whichever profile shows up)"
-        fi
-    else
-        log_info "No AppArmor Chrome profiles detected."
-    fi
-else
-    log_info "AppArmor not found on this system."
-fi
-
-# ── 6. Locate & verify Chromium ────────────
+# ── 7. Locate & verify Chromium ────────────
 
 echo ""
-log_info "[6/6] Locating and verifying Chromium binary..."
+log_info "[7/7] Locating and verifying Chromium binary..."
 
 CHROMIUM_PATH=""
 
@@ -190,15 +193,8 @@ cache_dirs+=(
     "/root/.cache/puppeteer"
 )
 
-# Also search the old Playwright cache (might still exist)
-cache_dirs+=(
-    "/var/www/.cache/ms-playwright"
-    "/root/.cache/ms-playwright"
-)
-
 for homedir in /home/* /var/www /root; do
     [ -d "$homedir/.cache/puppeteer" ] && cache_dirs+=("$homedir/.cache/puppeteer")
-    [ -d "$homedir/.cache/ms-playwright" ] && cache_dirs+=("$homedir/.cache/ms-playwright")
 done
 
 declare -A seen
@@ -219,6 +215,17 @@ for cache_dir in "${unique_dirs[@]}"; do
     fi
 done
 
+# Fallback: check for Snap Chromium (common on Ubuntu 24.04)
+if [ -z "$CHROMIUM_PATH" ] || [ ! -f "$CHROMIUM_PATH" ]; then
+    log_info "  Puppeteer Chrome not found, trying Snap Chromium..."
+    SNAP_CHROMIUM="/snap/bin/chromium"
+    if [ -f "$SNAP_CHROMIUM" ]; then
+        CHROMIUM_PATH="$SNAP_CHROMIUM"
+    elif command -v chromium-browser &>/dev/null; then
+        CHROMIUM_PATH="$(command -v chromium-browser)"
+    fi
+fi
+
 if [ -z "$CHROMIUM_PATH" ] || [ ! -f "$CHROMIUM_PATH" ]; then
     log_error "Could not find Chromium binary after installation."
     log_error "Searched these directories:"
@@ -237,22 +244,57 @@ log_info "  Binary : $CHROMIUM_PATH"
 VERSION=$(sudo -u "$APP_USER" "$CHROMIUM_PATH" --version 2>&1) || {
     log_error "Chromium version check failed."
     log_error "Missing system libraries? Run: ldd '$CHROMIUM_PATH' | grep 'not found'"
+    log_error ""
+    log_error "If this is a Snap-installed Chromium, try installing Puppeteer's Chrome:"
+    log_error "  sudo -u $APP_USER npx puppeteer browsers install chrome --install-deps"
     die "Chromium cannot be launched."
 }
 
 log_info "  Version: $VERSION"
 
-# ── Persist the path in .env ───────────────
+# Detect Snap Chromium and warn about temp path
+if echo "$CHROMIUM_PATH" | grep -q "/snap/"; then
+    log_info "  Detected Snap Chromium — Browsershot temp path set to $BROWSERSHOT_TEMP"
+fi
+
+# ── Persist configuration in .env ──────────
 
 ENV_FILE="$APP_DIR/.env"
 if [ -f "$ENV_FILE" ]; then
+    # PDF driver
+    if grep -q "^LARAVEL_PDF_DRIVER=" "$ENV_FILE"; then
+        sed -i "s|^LARAVEL_PDF_DRIVER=.*|LARAVEL_PDF_DRIVER=browsershot|" "$ENV_FILE"
+    else
+        echo "" >> "$ENV_FILE"
+        echo "LARAVEL_PDF_DRIVER=browsershot" >> "$ENV_FILE"
+    fi
+
+    # Chrome path
     if grep -q "^LARAVEL_PDF_CHROME_PATH=" "$ENV_FILE"; then
         sed -i "s|^LARAVEL_PDF_CHROME_PATH=.*|LARAVEL_PDF_CHROME_PATH=$CHROMIUM_PATH|" "$ENV_FILE"
     else
-        echo "" >> "$ENV_FILE"
         echo "LARAVEL_PDF_CHROME_PATH=$CHROMIUM_PATH" >> "$ENV_FILE"
     fi
-    log_info "  .env updated with LARAVEL_PDF_CHROME_PATH=$CHROMIUM_PATH"
+
+    # No sandbox
+    if grep -q "^LARAVEL_PDF_NO_SANDBOX=" "$ENV_FILE"; then
+        sed -i "s|^LARAVEL_PDF_NO_SANDBOX=.*|LARAVEL_PDF_NO_SANDBOX=true|" "$ENV_FILE"
+    else
+        echo "LARAVEL_PDF_NO_SANDBOX=true" >> "$ENV_FILE"
+    fi
+
+    log_info "  .env updated:"
+    log_info "    LARAVEL_PDF_DRIVER=browsershot"
+    log_info "    LARAVEL_PDF_CHROME_PATH=$CHROMIUM_PATH"
+    log_info "    LARAVEL_PDF_NO_SANDBOX=true"
+
+    # Remove stale Playwright keys if present
+    if grep -q "^PLAYWRIGHT_CHROMIUM_PATH=" "$ENV_FILE"; then
+        sed -i '/^PLAYWRIGHT_CHROMIUM_PATH=/d' "$ENV_FILE"
+        log_info "    Removed stale PLAYWRIGHT_CHROMIUM_PATH"
+    fi
+else
+    log_warn "  .env not found at $ENV_FILE — skipping env configuration."
 fi
 
 # ── Done ───────────────────────────────────

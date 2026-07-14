@@ -51,6 +51,11 @@ final class PdfService
                     ->timeout($timeout * 1000)
                     ->waitUntilNetworkIdle();
 
+                $tempPath = $options['tempPath']
+                    ?? storage_path('app/temp/browsershot');
+
+                $browsershot->setCustomTempPath($tempPath);
+
                 $chromePath = $options['executablePath']
                     ?? config('laravel-pdf.browsershot.chrome_path')
                     ?? null;
