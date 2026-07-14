@@ -38,8 +38,12 @@ sudo apt install -y nodejs
 cd /var/www
 sudo git clone <your-new-remote-url> pccs
 cd pccs
-sudo chown -R $USER:$USER .
+sudo usermod -a -G www-data $USER
+sudo chown -R $USER:www-data .
+sudo chmod -R g+s storage bootstrap/cache
 ```
+
+**Important:** Log out and back in (or run `newgrp www-data`) for the group addition to take effect.
 
 ## 3. Environment
 
@@ -120,18 +124,18 @@ Create the Browsershot temp directory (required for Snap Chromium on Ubuntu 24.0
 
 ```bash
 mkdir -p storage/app/temp/browsershot
-chown -R www-data:www-data storage/app/temp
+chgrp -R www-data storage/app/temp
 chmod -R 775 storage/app/temp
 ```
 
 ## 6. Permissions
 
 ```bash
-sudo chown -R www-data:www-data storage bootstrap/cache public/build
+sudo chgrp -R www-data storage bootstrap/cache public/build
 sudo chmod -R 775 storage bootstrap/cache
 
 # Ensure Browsershot temp dir is writable
-sudo chown -R www-data:www-data storage/app/temp
+sudo chgrp -R www-data storage/app/temp
 ```
 
 ## 7. Queue worker (systemd)
